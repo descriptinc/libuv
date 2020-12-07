@@ -458,7 +458,7 @@ int uv_spawn(uv_loop_t* loop,
       POSIX_SPAWN_CLOEXEC_DEFAULT |
       POSIX_SPAWN_SETSIGDEF |
       POSIX_SPAWN_SETSIGMASK |
-      options->flags & UV_PROCESS_DETACHED ? POSIX_SPAWN_SETSID : 0
+      (options->flags & UV_PROCESS_DETACHED ? POSIX_SPAWN_SETSID : 0)
       );
     if(err)
       goto error;
