@@ -33,6 +33,8 @@
 #include <fcntl.h>
 #include <poll.h>
 
+#include <spawn.h>
+
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
 # include <crt_externs.h>
 # define environ (*_NSGetEnviron())
@@ -373,10 +375,15 @@ int uv_spawn(uv_loop_t* loop,
   uv__handle_init(loop, (uv_handle_t*)process, UV_PROCESS);
   QUEUE_INIT(&process->queue);
 
+  // Make at least 3 file descriptors avialable to the child
+  // (stdin, stdout, stderr)
   stdio_count = options->stdio_count;
   if (stdio_count < 3)
     stdio_count = 3;
 
+  // Try to use the pipes_storage as the store for pipes, 
+  // but if more pipes are needed than there are already 
+  // allocated, allocate a new 
   err = UV_ENOMEM;
   pipes = pipes_storage;
   if (stdio_count > (int) ARRAY_SIZE(pipes_storage))
@@ -424,20 +431,101 @@ int uv_spawn(uv_loop_t* loop,
 
   /* Acquire write lock to prevent opening new fds in worker threads */
   uv_rwlock_wrlock(&loop->cloexec_lock);
-  pid = fork();
 
-  if (pid == -1) {
-    err = UV__ERR(errno);
-    uv_rwlock_wrunlock(&loop->cloexec_lock);
-    uv__close(signal_pipe[0]);
-    uv__close(signal_pipe[1]);
-    goto error;
-  }
+#if defined(__APPLE__)
+  if (__builtin_available(macOS 10.15, *)) {
+    posix_spawnattr_t attrs;
+    err = posix_spawnattr_init(&attrs);
+    if(err)
+      goto error;
 
-  if (pid == 0) {
-    uv__process_child_init(options, stdio_count, pipes, signal_pipe[1]);
-    abort();
+    if ((options->flags & UV_PROCESS_SETUID) && posix_spawnattr_set_uid_np(&attrs, options->uid)) {
+      goto error;
+    }
+    if ((options->flags & UV_PROCESS_SETGID) && posix_spawnattr_set_gid_np(&attrs, options->gid)) {
+      goto error;
+    }
+
+    // Set flags for spawn behavior 
+    // 1) POSIX_SPAWN_CLOWEXEC_DEFAULT: (Apple Extension) All descriptors in t
+    // he parent will be treated as if they had been created with O_CLOEXEC. 
+    // The only fds that will be passed on to the child are those manipulated by the file actions
+    // 2) POSIX_SPAWN_SETSIGDEF: signals mentioned in sawn-sigdeffault in the spawn attributes
+    // will be reset to behave as their default
+    // 3) POSIX_SPAWN_SETSIGMASK: signal mask will be set to the value of spaw-sigmask in attributes
+    // 4) POSIX_SPAWN_SETSID: if process should be a new session leader, do that.
+    err = posix_spawnattr_setflags(&attrs, 
+      POSIX_SPAWN_CLOEXEC_DEFAULT |
+      POSIX_SPAWN_SETSIGDEF |
+      POSIX_SPAWN_SETSIGMASK |
+      options->flags & UV_PROCESS_DETACHED ? POSIX_SPAWN_SETSID : 0
+      );
+    if(err)
+      goto error;
+
+    // Reset all signal the child to their default behavior
+    sigset_t signal_set;
+    sigfillset(&signal_set);
+    err = posix_spawnattr_setsigdefault(&attrs, &signal_set);
+    if(err) 
+      goto error;
+
+    // Reset the signal mask for all signals
+    sigemptyset(&signal_set);
+    err = posix_spawnattr_setsigmask(&attrs, &signal_set);
+    if(err)
+      goto error;
+
+    posix_spawn_file_actions_t actions;
+    err = posix_spawn_file_actions_init(&actions);
+    if(err)
+      goto error;
+
+    if (options->cwd != NULL && posix_spawn_file_actions_addchdir_np(&actions, options->cwd))
+        goto error;
+
+#if 0
+    /* TODO: Fix the file descriptor stuff out */
+
+    for(int fd = 0 ; fd < 3 ; ++fd) {
+      if(container->)
+    }
+
+    // Explicit set of descriptors to pass to the child
+    for(int fd = 0 ; fd < options->stdio_count; ++fd) {
+      uv_stdio_container_t *container = &options->stdio[fd];
+
+
+
+      if(container->flags & UV_INHERIT_FD || container->flags & UV_INHERIT_STREAM) {                    
+        posix_spawn_file_actions_add_inherit_np(&actions, pipes[fd][1]);
+      } else if(container->flags & UV_CREATE_PIPE) {
+        posix_spawn_file_actions_add_close(&actions, pipes[fd][0]);
+        posix_spawn_file_actions_add_close(&actions, pipes[fd][0]);
+      }
+    }
+#endif
+
+    err = posix_spawnp(&pid, options->file, &actions, &attrs, options->args, options->env);    
+  } else {
+#endif
+    pid = fork();
+
+    if (pid == -1) {
+      err = UV__ERR(errno);
+      uv_rwlock_wrunlock(&loop->cloexec_lock);
+      uv__close(signal_pipe[0]);
+      uv__close(signal_pipe[1]);
+      goto error;
+    }
+
+    if (pid == 0) {
+      uv__process_child_init(options, stdio_count, pipes, signal_pipe[1]);
+      abort();
+    }
+#if defined(__APPLE__)
   }
+#endif
 
   /* Release lock in parent process */
   uv_rwlock_wrunlock(&loop->cloexec_lock);
