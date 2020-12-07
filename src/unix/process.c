@@ -40,6 +40,11 @@
 extern char **environ;
 #endif
 
+#define USE_POSIX_SPAWN
+#ifdef USE_POSIX_SPAWN
+# include <spawn.h>
+#endif
+
 #if defined(__linux__) || defined(__GLIBC__)
 # include <grp.h>
 #endif
@@ -424,7 +429,20 @@ int uv_spawn(uv_loop_t* loop,
 
   /* Acquire write lock to prevent opening new fds in worker threads */
   uv_rwlock_wrlock(&loop->cloexec_lock);
-  pid = fork();
+  
+  #ifdef USE_POSIX_SPAWN
+    posix_spawn_file_actions_t actions;
+    err = posix_spawn_file_actions_init(&actions);
+    if(err)
+      goto error;
+    posix_spawnattr_t attrs;
+    err = posix_spawnattr_init(&attrs);
+    if(err)
+      goto error;
+    err = posix_spawn(&pid, options->file, &actions, &attrs, options->args, options->env);
+  #else
+    pid = fork();
+  #endif
 
   if (pid == -1) {
     err = UV__ERR(errno);
