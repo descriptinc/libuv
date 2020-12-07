@@ -435,10 +435,15 @@ int uv_spawn(uv_loop_t* loop,
     err = posix_spawn_file_actions_init(&actions);
     if(err)
       goto error;
+
+    if (options->cwd != NULL && posix_spawn_file_actions_addchdir_np(&actions, options->cwd))
+      goto error;
+    
     posix_spawnattr_t attrs;
     err = posix_spawnattr_init(&attrs);
     if(err)
       goto error;
+    
     err = posix_spawn(&pid, options->file, &actions, &attrs, options->args, options->env);
   #else
     pid = fork();
