@@ -487,31 +487,46 @@ int uv_spawn(uv_loop_t* loop,
     // First, dupe any required fd into orbit, out of the range of 
     // the descriptors that should be mapped in.
     for(fd = 0 ; fd < options->stdio_count; ++fd) {
-      if(pipes[fd][1] > 0)
-        posix_spawn_file_actions_adddup2(&actions, pipes[fd][1], options->stdio_count + fd);
+      if(pipes[fd][1] < 0)
+        continue;
+      
+      err = posix_spawn_file_actions_adddup2(&actions, pipes[fd][1], options->stdio_count + fd);
+      if(err)
+        goto error;
     }
 
     // Second, move the descriptors into their respective places
     for(fd = 0 ; fd < options->stdio_count; ++fd) {
-      if(pipes[fd][1] > 0)
-        posix_spawn_file_actions_adddup2(&actions, options->stdio_count + fd, fd);
+      if(pipes[fd][1] < 0)
+        continue;
+
+      err = posix_spawn_file_actions_adddup2(&actions, options->stdio_count + fd, fd);
+      if(err)
+        goto error;
     }
 
     // Finally, close all the superfluous descriptors
     for(fd = 0; fd < options->stdio_count; ++fd) {
-      if(pipes[fd][1] > 0)
-        posix_spawn_file_actions_addclose(&actions, options->stdio_count + fd);
+      if(pipes[fd][1] < 0)
+        continue;
+      
+      err = posix_spawn_file_actions_addclose(&actions, options->stdio_count + fd);
+      if(err)
+        goto error;
     }
 
     // Finally process the standard streams as per de documentation
     for(fd = 0 ; fd < 3 ; ++fd) {
-      if(pipes[fd][1] != -1) 
-        continue;
-      
       // If ignored, open as /dev/null
       const int oflags = fd == 0 ? O_RDONLY : O_RDWR;
       const int mode = 0;
-      posix_spawn_file_actions_addopen(&actions, fd, "/dev/null", oflags, mode);
+
+      if(pipes[fd][1] != -1) 
+        continue;
+      
+      err = posix_spawn_file_actions_addopen(&actions, fd, "/dev/null", oflags, mode);
+      if(err)
+        goto error;
     } 
 
     // Spawn the child 
