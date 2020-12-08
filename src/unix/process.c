@@ -33,9 +33,8 @@
 #include <fcntl.h>
 #include <poll.h>
 
-#include <spawn.h>
-
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
+#include <spawn.h>
 # include <crt_externs.h>
 # define environ (*_NSGetEnviron())
 #else
@@ -361,7 +360,6 @@ int uv_spawn(uv_loop_t* loop,
   int exec_errorno;
   int i;
   int status;
-  int fd;
 
   assert(options->file != NULL);
   assert(!(options->flags & ~(UV_PROCESS_DETACHED |
@@ -375,15 +373,10 @@ int uv_spawn(uv_loop_t* loop,
   uv__handle_init(loop, (uv_handle_t*)process, UV_PROCESS);
   QUEUE_INIT(&process->queue);
 
-  // Make at least 3 file descriptors avialable to the child
-  // (stdin, stdout, stderr)
   stdio_count = options->stdio_count;
   if (stdio_count < 3)
     stdio_count = 3;
 
-  // Try to use the pipes_storage as the store for pipes, 
-  // but if more pipes are needed than there are already 
-  // allocated, allocate a new 
   err = UV_ENOMEM;
   pipes = pipes_storage;
   if (stdio_count > (int) ARRAY_SIZE(pipes_storage))
@@ -432,9 +425,29 @@ int uv_spawn(uv_loop_t* loop,
   /* Acquire write lock to prevent opening new fds in worker threads */
   uv_rwlock_wrlock(&loop->cloexec_lock);
 
+/* Especial child process spawn case for macOS Big Sur (11.0) onwards 
+ *
+ * Big Sur introduced a significant performance degradation on a call to
+ * fork/exec when the process has many pages mmaped in with MAP_JIT, like, say
+ * a javascript interpreter. Electron-based applications, for example,
+ * are impacted; though the magnitude of the impact depends on how much the
+ * app relies on subprocesses. 
+ * 
+ * On macOS, though, posix_spawn is implemented in a way that does not 
+ * exhibit the problem. This block implements the forking and preparation
+ * logic with poxis_spawn and its related primitves. It also takes advantage of 
+ * the macOS extension POSIX_SPAWN_CLOEXEC_DEFAULT that makes impossible to
+ * leak descriptors to the child process.
+ * 
+ * see https://github.com/libuv/libuv/issues/3050
+ */
 #if defined(__APPLE__)
   if (__builtin_available(macOS 10.15, *)) {
+    int fd;
+    sigset_t signal_set;
     posix_spawnattr_t attrs;
+    posix_spawn_file_actions_t actions;
+
     err = posix_spawnattr_init(&attrs);
     if(err)
       goto error;
@@ -447,13 +460,13 @@ int uv_spawn(uv_loop_t* loop,
     }
 
     // Set flags for spawn behavior 
-    // 1) POSIX_SPAWN_CLOWEXEC_DEFAULT: (Apple Extension) All descriptors in t
-    // he parent will be treated as if they had been created with O_CLOEXEC. 
+    // 1) POSIX_SPAWN_CLOEXEC_DEFAULT: (Apple Extension) All descriptors in
+    // the parent will be treated as if they had been created with O_CLOEXEC. 
     // The only fds that will be passed on to the child are those manipulated by the file actions
-    // 2) POSIX_SPAWN_SETSIGDEF: signals mentioned in sawn-sigdeffault in the spawn attributes
+    // 2) POSIX_SPAWN_SETSIGDEF: Signals mentioned in spawn-sigdefault in the spawn attributes
     // will be reset to behave as their default
-    // 3) POSIX_SPAWN_SETSIGMASK: signal mask will be set to the value of spaw-sigmask in attributes
-    // 4) POSIX_SPAWN_SETSID: if process should be a new session leader, do that.
+    // 3) POSIX_SPAWN_SETSIGMASK: Signal mask will be set to the value of spawn-sigmask in attributes
+    // 4) POSIX_SPAWN_SETSID: Make the process a new session leader if a detached session was requested.
     err = posix_spawnattr_setflags(&attrs, 
       POSIX_SPAWN_CLOEXEC_DEFAULT |
       POSIX_SPAWN_SETSIGDEF |
@@ -464,7 +477,6 @@ int uv_spawn(uv_loop_t* loop,
       goto error;
 
     // Reset all signal the child to their default behavior
-    sigset_t signal_set;
     sigfillset(&signal_set);
     err = posix_spawnattr_setsigdefault(&attrs, &signal_set);
     if(err) 
@@ -476,7 +488,6 @@ int uv_spawn(uv_loop_t* loop,
     if(err)
       goto error;
 
-    posix_spawn_file_actions_t actions;
     err = posix_spawn_file_actions_init(&actions);
     if(err)
       goto error;
