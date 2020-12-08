@@ -484,29 +484,65 @@ int uv_spawn(uv_loop_t* loop,
     if (options->cwd != NULL && posix_spawn_file_actions_addchdir_np(&actions, options->cwd))
         goto error;
 
-#if 0
-    /* TODO: Fix the file descriptor stuff out */
-
-    for(int fd = 0 ; fd < 3 ; ++fd) {
-      if(container->)
-    }
-
-    // Explicit set of descriptors to pass to the child
+    // Process the fd allocations
     for(int fd = 0 ; fd < options->stdio_count; ++fd) {
-      uv_stdio_container_t *container = &options->stdio[fd];
+      const int mask = UV_IGNORE | UV_CREATE_PIPE | UV_INHERIT_FD | UV_INHERIT_STREAM;
+      const int flags = options->stdio[fd].flags & mask;
+
+      if(flags == UV_IGNORE) {
+        asset(pipes[fd][1] = -1);
+        if(fd < 3) {
+          // When ignored, the standard streams are redirected to (or from)
+          // /dev/null, per documentation. This is done by the child, and in the
+          // fork() path it is done by uv__process_child_init
+          const int oflags = fd == 0 ? O_RDONLY : O_RDWR;
+          const int mode = 0;
+          posix_spawn_file_actions_addopen(&actions, fd, "/dev/null", oflags, mode);
+        }
+      } else if (flags == UV_INHERIT_FD || flags == UV_INHERIT_STREAM) {
+        // The actual descriptors in this code path are set up by
+        // uv__process_init_stdio
+
+        // FIXME: this is broken. If the caller specified that the child
+        // stdout is the parents stderr, and that the childs stderr is the 
+        // parents stdout, this logic will
+        //  * for fd = 1 (child stdout) will dup2(2, 1) <- duplicating parents 2 into 1
+        //  * for fd = 2 (child stderr) will dup2(1, 2) <- duplicating parents 1 into 2
+        // ...but since the first call had already rewritten 1, both will
+        // end up pointing to the parent's 1.
 
 
+        // Check if the inherited FD is already at the same fd that was 
+        // expected for it in the child (the entry location in the stdio
+        // table). If not, make sure it ends up there.
+        if(fd == pipes[fd][1]) {
+          // Make the original descriptor available in the child
+          posix_spawn_file_actions_addinherit_np(&actions, pipes[fd][1]);
+        } else {
+          // Dup the inherited fd into the expected fd in the child
+          posix_spawn_file_actions_adddup2(&actions, pipes[fd][1], fd);
 
-      if(container->flags & UV_INHERIT_FD || container->flags & UV_INHERIT_STREAM) {                    
-        posix_spawn_file_actions_add_inherit_np(&actions, pipes[fd][1]);
-      } else if(container->flags & UV_CREATE_PIPE) {
-        posix_spawn_file_actions_add_close(&actions, pipes[fd][0]);
-        posix_spawn_file_actions_add_close(&actions, pipes[fd][0]);
+          // ????????
+          // FIXME: What do we do with the parent-inherited fd? Can't close 
+          // if it is also inherited to other slot at least.          
+        }        
+      } else if (flags == UV_CREATE_PIPE) {
+        // PIPEs
+        //posix_spawn_file_actions_adddup2(&actions, )
+      } else {
+        fprintf(stderr, "Offending flags: 0x%x\n", flags);
+        // This should not happen, because it would have failed first in 
+        // uv__process_init_stdio
+        assert(0 && "Unexpected flags");
+        err = UV_EINVAL;
       }
     }
-#endif
 
+    // Spawn the child 
     err = posix_spawnp(&pid, options->file, &actions, &attrs, options->args, options->env);    
+
+
+
   } else {
 #endif
     pid = fork();
