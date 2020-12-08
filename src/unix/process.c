@@ -35,6 +35,7 @@
 
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
 #include <spawn.h>
+#include <sys/kauth.h>
 # include <crt_externs.h>
 # define environ (*_NSGetEnviron())
 #else
@@ -459,14 +460,20 @@ int uv_spawn(uv_loop_t* loop,
       goto error;
     }
 
-    // Set flags for spawn behavior 
-    // 1) POSIX_SPAWN_CLOEXEC_DEFAULT: (Apple Extension) All descriptors in
-    // the parent will be treated as if they had been created with O_CLOEXEC. 
-    // The only fds that will be passed on to the child are those manipulated by the file actions
-    // 2) POSIX_SPAWN_SETSIGDEF: Signals mentioned in spawn-sigdefault in the spawn attributes
-    // will be reset to behave as their default
-    // 3) POSIX_SPAWN_SETSIGMASK: Signal mask will be set to the value of spawn-sigmask in attributes
-    // 4) POSIX_SPAWN_SETSID: Make the process a new session leader if a detached session was requested.
+    if(options->flags & (UV_PROCESS_SETUID | UV_PROCESS_SETGID)) {
+      /* See the comment on the call to setgroups in uv__process_child_init above
+       * for why this is not a fatal error */
+      SAVE_ERRNO(posix_spawnattr_set_groups_np(&attrs, 0, NULL, KAUTH_UID_NONE));
+    }
+
+    /* Set flags for spawn behavior 
+     * 1) POSIX_SPAWN_CLOEXEC_DEFAULT: (Apple Extension) All descriptors in
+     * the parent will be treated as if they had been created with O_CLOEXEC. 
+     * The only fds that will be passed on to the child are those manipulated by the file actions
+     * 2) POSIX_SPAWN_SETSIGDEF: Signals mentioned in spawn-sigdefault in the spawn attributes
+     * will be reset to behave as their default
+     * 3) POSIX_SPAWN_SETSIGMASK: Signal mask will be set to the value of spawn-sigmask in attributes
+     * 4) POSIX_SPAWN_SETSID: Make the process a new session leader if a detached session was requested. */
     err = posix_spawnattr_setflags(&attrs, 
       POSIX_SPAWN_CLOEXEC_DEFAULT |
       POSIX_SPAWN_SETSIGDEF |
