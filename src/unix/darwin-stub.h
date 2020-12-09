@@ -23,6 +23,7 @@
 #define UV_DARWIN_STUB_H_
 
 #include <stdint.h>
+#include <spawn.h>
 
 struct CFArrayCallBacks;
 struct CFRunLoopSourceContext;
@@ -109,5 +110,10 @@ static const int kFSEventStreamEventFlagMount = 64;
 static const int kFSEventStreamEventFlagRootChanged = 32;
 static const int kFSEventStreamEventFlagUnmount = 128;
 static const int kFSEventStreamEventFlagUserDropped = 2;
+
+// Copied from https://opensource.apple.com/source/xnu/xnu-6153.101.6/libsyscall/wrappers/spawn/spawn_private.h.auto.htmland 
+int     posix_spawnattr_set_uid_np(const posix_spawnattr_t * __restrict, uid_t) __API_AVAILABLE(macos(10.15), ios(13.0), tvos(13.0), watchos(6.0));
+int     posix_spawnattr_set_gid_np(const posix_spawnattr_t * __restrict, gid_t) __API_AVAILABLE(macos(10.15), ios(13.0), tvos(13.0), watchos(6.0));
+int     posix_spawnattr_set_groups_np(const posix_spawnattr_t * __restrict, int, gid_t * __restrict, uid_t) __API_AVAILABLE(macos(10.15), ios(13.0), tvos(13.0), watchos(6.0));
 
 #endif  /* UV_DARWIN_STUB_H_ */
