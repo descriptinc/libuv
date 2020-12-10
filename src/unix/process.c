@@ -548,8 +548,11 @@ int uv_spawn(uv_loop_t* loop,
         goto error;
     } 
 
-    // Spawn the child 
-    err = posix_spawnp(&pid, options->file, &actions, &attrs, options->args, options->env);    
+    // Preserve parent environment if not explicitly set
+    char ** env = options->env ? options->env : environ;
+
+    // Spawn the child
+    err = posix_spawnp(&pid, options->file, &actions, &attrs, options->args, env);
 
     // Could not spawn
     if (err != 0) {
