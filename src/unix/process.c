@@ -553,7 +553,7 @@ int uv_spawn(uv_loop_t* loop,
 
     // Could not spawn
     if (err != 0) {
-      err = UV__ERR(errno);
+      err = UV__ERR(err);
       uv_rwlock_wrunlock(&loop->cloexec_lock);
       uv__close(signal_pipe[0]);
       uv__close(signal_pipe[1]);
