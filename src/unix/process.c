@@ -349,7 +349,8 @@ static void uv__process_child_init(const uv_process_options_t* options,
 int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
                                          int stdio_count,
                                          int (*pipes)[2], 
-                                         pid_t* pid) {
+                                         pid_t* pid) 
+                                         __API_AVAILABLE(macos(10.15)) {
   int fd;
   int err;
   sigset_t signal_set;
