@@ -345,6 +345,181 @@ static void uv__process_child_init(const uv_process_options_t* options,
 }
 #endif
 
+
+int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
+                                         int stdio_count,
+                                         int (*pipes)[2], 
+                                         pid_t* pid) {
+  int fd;
+  int err;
+  sigset_t signal_set;
+  posix_spawnattr_t attrs;
+  posix_spawn_file_actions_t actions;
+  unsigned int flags;
+
+  err = posix_spawnattr_init(&attrs);
+  if(err != 0)
+    return err;
+
+  if (options->flags & UV_PROCESS_SETUID) 
+    if(posix_spawnattr_set_uid_np(&attrs, options->uid) != 0)
+      return err;
+
+  if (options->flags & UV_PROCESS_SETGID) 
+    if (posix_spawnattr_set_gid_np(&attrs, options->gid) != 0) 
+      return err;
+
+  if(options->flags & (UV_PROCESS_SETUID | UV_PROCESS_SETGID)) {
+    /* See the comment on the call to setgroups in uv__process_child_init above
+      * for why this is not a fatal error */
+    SAVE_ERRNO(posix_spawnattr_set_groups_np(&attrs, 0, NULL, KAUTH_UID_NONE));
+  }
+
+  /* Set flags for spawn behavior 
+    * 1) POSIX_SPAWN_CLOEXEC_DEFAULT: (Apple Extension) All descriptors in
+    * the parent will be treated as if they had been created with O_CLOEXEC. 
+    * The only fds that will be passed on to the child are those manipulated by the file actions
+    * 2) POSIX_SPAWN_SETSIGDEF: Signals mentioned in spawn-sigdefault in the spawn attributes
+    * will be reset to behave as their default
+    * 3) POSIX_SPAWN_SETSIGMASK: Signal mask will be set to the value of spawn-sigmask in attributes
+    * 4) POSIX_SPAWN_SETSID: Make the process a new session leader if a detached session was requested. */
+  flags = POSIX_SPAWN_CLOEXEC_DEFAULT |
+    POSIX_SPAWN_SETSIGDEF |
+    POSIX_SPAWN_SETSIGMASK;
+  if(options->flags & UV_PROCESS_DETACHED) 
+    flags |= POSIX_SPAWN_SETSID;
+  err = posix_spawnattr_setflags(&attrs, flags);
+  if(err != 0)
+    return err;
+
+  // Reset all signal the child to their default behavior
+  sigfillset(&signal_set);
+  err = posix_spawnattr_setsigdefault(&attrs, &signal_set);
+  if(err != 0) 
+    return err;
+
+  // Reset the signal mask for all signals
+  sigemptyset(&signal_set);
+  err = posix_spawnattr_setsigmask(&attrs, &signal_set);
+  if(err != 0)
+    return err;
+
+  err = posix_spawn_file_actions_init(&actions);
+  if(err != 0)
+    return err;
+
+  if (options->cwd != NULL && posix_spawn_file_actions_addchdir_np(&actions, options->cwd))
+    return err;
+
+  // First, dupe any required fd into orbit, out of the range of 
+  // the descriptors that should be mapped in.
+  for(fd = 0 ; fd < stdio_count; ++fd) {
+    if(pipes[fd][1] < 0)
+      continue;
+    
+    err = posix_spawn_file_actions_adddup2(&actions, pipes[fd][1], stdio_count + fd);
+    if(err != 0)
+      return err;
+  }
+
+  // Second, move the descriptors into their respective places
+  for(fd = 0 ; fd < stdio_count; ++fd) {
+    if(pipes[fd][1] < 0)
+      continue;
+
+    err = posix_spawn_file_actions_adddup2(&actions, stdio_count + fd, fd);
+    if(err != 0)
+      return err;
+  }
+
+  // Finally, close all the superfluous descriptors
+  for(fd = 0; fd < stdio_count; ++fd) {
+    if(pipes[fd][1] < 0)
+      continue;
+    
+    err = posix_spawn_file_actions_addclose(&actions, stdio_count + fd);
+    if(err != 0)
+      return err;
+  }
+
+  // Finally process the standard streams as per de documentation
+  for(fd = 0 ; fd < 3 ; ++fd) {
+    // If ignored, open as /dev/null
+    const int oflags = fd == 0 ? O_RDONLY : O_RDWR;
+    const int mode = 0;
+
+    if(pipes[fd][1] != -1) 
+      continue;
+    
+    err = posix_spawn_file_actions_addopen(&actions, fd, "/dev/null", oflags, mode);
+    if(err != 0)
+      return err;
+  } 
+
+  // Preserve parent environment if not explicitly set
+  char ** env = options->env ? options->env : environ;
+
+  // Spawn the child
+  err = posix_spawnp(pid, options->file, &actions, &attrs, options->args, env);
+
+  return UV__ERR(err);
+}
+
+int uv__spawn_and_init_child_fork(const uv_process_options_t* options,
+                                  int stdio_count,
+                                  int (*pipes)[2],
+                                  int error_fd,
+                                  pid_t* pid) {
+  *pid = fork();
+
+  if (*pid == -1) {
+    /* Failed to fork */
+    return UV__ERR(errno);
+  }
+
+  if (*pid == 0) {
+    /* Fork succeeded, in the child process */
+    uv__process_child_init(options, stdio_count, pipes, error_fd);
+    abort();
+  }
+
+  /* Fork succeeded, in the parent process */
+  return 0;
+}
+
+int uv__spawn_and_init_child(const uv_process_options_t* options,
+                             int stdio_count,
+                             int (*pipes)[2],
+                             int error_fd,
+                             pid_t* pid) {
+
+#if defined(__APPLE__) 
+  if(__builtin_available(macOS 10.15, *)) {
+    /* Especial child process spawn case for macOS Big Sur (11.0) onwards 
+     *
+     * Big Sur introduced a significant performance degradation on a call to
+     * fork/exec when the process has many pages mmaped in with MAP_JIT, like, say
+     * a javascript interpreter. Electron-based applications, for example,
+     * are impacted; though the magnitude of the impact depends on how much the
+     * app relies on subprocesses. 
+     * 
+     * On macOS, though, posix_spawn is implemented in a way that does not 
+     * exhibit the problem. This block implements the forking and preparation
+     * logic with poxis_spawn and its related primitves. It also takes advantage of 
+     * the macOS extension POSIX_SPAWN_CLOEXEC_DEFAULT that makes impossible to
+     * leak descriptors to the child process.
+     * 
+     * see https://github.com/libuv/libuv/issues/3050
+     */
+    return uv__spawn_and_init_child_posix_spawn(options, stdio_count, pipes, pid);
+  } else {
+#endif  
+    return uv__spawn_and_init_child_fork(options, stdio_count, pipes, error_fd, pid);
+#if defined(__APPLE__) 
+  }
+#endif
+}
+
 int uv_spawn(uv_loop_t* loop,
              uv_process_t* process,
              const uv_process_options_t* options) {
@@ -427,161 +602,14 @@ int uv_spawn(uv_loop_t* loop,
   /* Acquire write lock to prevent opening new fds in worker threads */
   uv_rwlock_wrlock(&loop->cloexec_lock);
 
-/* Especial child process spawn case for macOS Big Sur (11.0) onwards 
- *
- * Big Sur introduced a significant performance degradation on a call to
- * fork/exec when the process has many pages mmaped in with MAP_JIT, like, say
- * a javascript interpreter. Electron-based applications, for example,
- * are impacted; though the magnitude of the impact depends on how much the
- * app relies on subprocesses. 
- * 
- * On macOS, though, posix_spawn is implemented in a way that does not 
- * exhibit the problem. This block implements the forking and preparation
- * logic with poxis_spawn and its related primitves. It also takes advantage of 
- * the macOS extension POSIX_SPAWN_CLOEXEC_DEFAULT that makes impossible to
- * leak descriptors to the child process.
- * 
- * see https://github.com/libuv/libuv/issues/3050
- */
-#if defined(__APPLE__)
-  if (__builtin_available(macOS 10.15, *)) {
-    int fd;
-    sigset_t signal_set;
-    posix_spawnattr_t attrs;
-    posix_spawn_file_actions_t actions;
-
-    err = posix_spawnattr_init(&attrs);
-    if(err)
-      goto error;
-
-    if ((options->flags & UV_PROCESS_SETUID) && posix_spawnattr_set_uid_np(&attrs, options->uid)) {
-      goto error;
-    }
-    if ((options->flags & UV_PROCESS_SETGID) && posix_spawnattr_set_gid_np(&attrs, options->gid)) {
-      goto error;
-    }
-
-    if(options->flags & (UV_PROCESS_SETUID | UV_PROCESS_SETGID)) {
-      /* See the comment on the call to setgroups in uv__process_child_init above
-       * for why this is not a fatal error */
-      SAVE_ERRNO(posix_spawnattr_set_groups_np(&attrs, 0, NULL, KAUTH_UID_NONE));
-    }
-
-    /* Set flags for spawn behavior 
-     * 1) POSIX_SPAWN_CLOEXEC_DEFAULT: (Apple Extension) All descriptors in
-     * the parent will be treated as if they had been created with O_CLOEXEC. 
-     * The only fds that will be passed on to the child are those manipulated by the file actions
-     * 2) POSIX_SPAWN_SETSIGDEF: Signals mentioned in spawn-sigdefault in the spawn attributes
-     * will be reset to behave as their default
-     * 3) POSIX_SPAWN_SETSIGMASK: Signal mask will be set to the value of spawn-sigmask in attributes
-     * 4) POSIX_SPAWN_SETSID: Make the process a new session leader if a detached session was requested. */
-    err = posix_spawnattr_setflags(&attrs, 
-      POSIX_SPAWN_CLOEXEC_DEFAULT |
-      POSIX_SPAWN_SETSIGDEF |
-      POSIX_SPAWN_SETSIGMASK |
-      (options->flags & UV_PROCESS_DETACHED ? POSIX_SPAWN_SETSID : 0)
-      );
-    if(err)
-      goto error;
-
-    // Reset all signal the child to their default behavior
-    sigfillset(&signal_set);
-    err = posix_spawnattr_setsigdefault(&attrs, &signal_set);
-    if(err) 
-      goto error;
-
-    // Reset the signal mask for all signals
-    sigemptyset(&signal_set);
-    err = posix_spawnattr_setsigmask(&attrs, &signal_set);
-    if(err)
-      goto error;
-
-    err = posix_spawn_file_actions_init(&actions);
-    if(err)
-      goto error;
-
-    if (options->cwd != NULL && posix_spawn_file_actions_addchdir_np(&actions, options->cwd))
-      goto error;
-
-    // First, dupe any required fd into orbit, out of the range of 
-    // the descriptors that should be mapped in.
-    for(fd = 0 ; fd < options->stdio_count; ++fd) {
-      if(pipes[fd][1] < 0)
-        continue;
-      
-      err = posix_spawn_file_actions_adddup2(&actions, pipes[fd][1], options->stdio_count + fd);
-      if(err)
-        goto error;
-    }
-
-    // Second, move the descriptors into their respective places
-    for(fd = 0 ; fd < options->stdio_count; ++fd) {
-      if(pipes[fd][1] < 0)
-        continue;
-
-      err = posix_spawn_file_actions_adddup2(&actions, options->stdio_count + fd, fd);
-      if(err)
-        goto error;
-    }
-
-    // Finally, close all the superfluous descriptors
-    for(fd = 0; fd < options->stdio_count; ++fd) {
-      if(pipes[fd][1] < 0)
-        continue;
-      
-      err = posix_spawn_file_actions_addclose(&actions, options->stdio_count + fd);
-      if(err)
-        goto error;
-    }
-
-    // Finally process the standard streams as per de documentation
-    for(fd = 0 ; fd < 3 ; ++fd) {
-      // If ignored, open as /dev/null
-      const int oflags = fd == 0 ? O_RDONLY : O_RDWR;
-      const int mode = 0;
-
-      if(pipes[fd][1] != -1) 
-        continue;
-      
-      err = posix_spawn_file_actions_addopen(&actions, fd, "/dev/null", oflags, mode);
-      if(err)
-        goto error;
-    } 
-
-    // Preserve parent environment if not explicitly set
-    char ** env = options->env ? options->env : environ;
-
-    // Spawn the child
-    err = posix_spawnp(&pid, options->file, &actions, &attrs, options->args, env);
-
-    // Could not spawn
-    if (err != 0) {
-      err = UV__ERR(err);
-      uv_rwlock_wrunlock(&loop->cloexec_lock);
-      uv__close(signal_pipe[0]);
-      uv__close(signal_pipe[1]);
-      goto error;
-    }
-
-  } else {
-#endif
-    pid = fork();
-
-    if (pid == -1) {
-      err = UV__ERR(errno);
-      uv_rwlock_wrunlock(&loop->cloexec_lock);
-      uv__close(signal_pipe[0]);
-      uv__close(signal_pipe[1]);
-      goto error;
-    }
-
-    if (pid == 0) {
-      uv__process_child_init(options, stdio_count, pipes, signal_pipe[1]);
-      abort();
-    }
-#if defined(__APPLE__)
+  /* Spawn the child */
+  err = uv__spawn_and_init_child(options, stdio_count, pipes, signal_pipe[1], &pid);
+  if(err != 0) {
+    uv_rwlock_wrunlock(&loop->cloexec_lock);
+    uv__close(signal_pipe[0]);
+    uv__close(signal_pipe[1]);
+    goto error;
   }
-#endif
 
   /* Release lock in parent process */
   uv_rwlock_wrunlock(&loop->cloexec_lock);
