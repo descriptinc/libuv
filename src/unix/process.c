@@ -345,7 +345,7 @@ static void uv__process_child_init(const uv_process_options_t* options,
 }
 #endif
 
-
+#if defined(__APPLE__)
 int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
                                          int stdio_count,
                                          int (*pipes)[2], 
@@ -464,6 +464,7 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
 
   return UV__ERR(err);
 }
+#endif
 
 int uv__spawn_and_init_child_fork(const uv_process_options_t* options,
                                   int stdio_count,
