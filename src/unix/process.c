@@ -346,33 +346,35 @@ static void uv__process_child_init(const uv_process_options_t* options,
 #endif
 
 #if defined(__APPLE__)
-int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
-                                         int stdio_count,
-                                         int (*pipes)[2], 
-                                         pid_t* pid) {
-  int fd;
+int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs, 
+                                    const uv_process_options_t* options)
+{
   int err;
-  sigset_t signal_set;
-  posix_spawnattr_t attrs;
-  posix_spawn_file_actions_t actions;
   unsigned int flags;
+  sigset_t signal_set;
 
-  err = posix_spawnattr_init(&attrs);
-  if (err != 0)
+  err = posix_spawnattr_init(attrs);
+  if (err != 0) {
+    /* If initialization fails, no need to de-init, just return */
     return err;
+  }
 
-  if (options->flags & UV_PROCESS_SETUID) 
-    if (posix_spawnattr_set_uid_np(&attrs, options->uid) != 0)
-      return err;
+  if (options->flags & UV_PROCESS_SETUID) {
+    err = posix_spawnattr_set_uid_np(attrs, options->uid);
+    if (err != 0)
+      goto error;
+  }
 
-  if (options->flags & UV_PROCESS_SETGID) 
-    if (posix_spawnattr_set_gid_np(&attrs, options->gid) != 0) 
-      return err;
+  if (options->flags & UV_PROCESS_SETGID) {
+    err = posix_spawnattr_set_gid_np(attrs, options->gid);
+    if (err != 0) 
+      goto error;
+  }
 
   if (options->flags & (UV_PROCESS_SETUID | UV_PROCESS_SETGID)) {
     /* See the comment on the call to setgroups in uv__process_child_init above
       * for why this is not a fatal error */
-    SAVE_ERRNO(posix_spawnattr_set_groups_np(&attrs, 0, NULL, KAUTH_UID_NONE));
+    SAVE_ERRNO(posix_spawnattr_set_groups_np(attrs, 0, NULL, KAUTH_UID_NONE));
   }
 
   /* Set flags for spawn behavior 
@@ -391,31 +393,48 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
     POSIX_SPAWN_SETSIGMASK;
   if (options->flags & UV_PROCESS_DETACHED) 
     flags |= POSIX_SPAWN_SETSID;
-  err = posix_spawnattr_setflags(&attrs, flags);
+  err = posix_spawnattr_setflags(attrs, flags);
   if (err != 0)
-    return err;
+    goto error;
 
   /*  Reset all signal the child to their default behavior */
   sigfillset(&signal_set);
-  err = posix_spawnattr_setsigdefault(&attrs, &signal_set);
+  err = posix_spawnattr_setsigdefault(attrs, &signal_set);
   if (err != 0) 
-    return err;
+    goto error;
 
   /*  Reset the signal mask for all signals */
   sigemptyset(&signal_set);
-  err = posix_spawnattr_setsigmask(&attrs, &signal_set);
+  err = posix_spawnattr_setsigmask(attrs, &signal_set);
   if (err != 0)
-    return err;
+    goto error;
 
-  err = posix_spawn_file_actions_init(&actions);
-  if (err != 0)
+  return err;
+
+error:
+  (void) posix_spawnattr_destroy(attrs);
+  return err;
+}
+
+int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
+                                           const uv_process_options_t* options,
+                                           int stdio_count,
+                                           int (*pipes)[2])
+{
+  int fd;
+  int err;
+
+  err = posix_spawn_file_actions_init(actions);
+  if (err != 0) {
+    /* If initialization fails, no need to de-init, just return */
     return err;
+  }
 
   /* Set the current working directory if requested */
   if (options->cwd != NULL) {
-    err = posix_spawn_file_actions_addchdir_np(&actions, options->cwd);
+    err = posix_spawn_file_actions_addchdir_np(actions, options->cwd);
     if (err != 0)
-      return err;
+      goto error;
   }
 
   /* First, dupe any required fd into orbit, out of the range of 
@@ -424,9 +443,9 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
     if (pipes[fd][1] < 0)
       continue;
     
-    err = posix_spawn_file_actions_adddup2(&actions, pipes[fd][1], stdio_count + fd);
+    err = posix_spawn_file_actions_adddup2(actions, pipes[fd][1], stdio_count + fd);
     if (err != 0)
-      return err;
+      goto error;
   }
 
   /*  Second, move the descriptors into their respective places */
@@ -434,9 +453,9 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
     if (pipes[fd][1] < 0)
       continue;
 
-    err = posix_spawn_file_actions_adddup2(&actions, stdio_count + fd, fd);
+    err = posix_spawn_file_actions_adddup2(actions, stdio_count + fd, fd);
     if (err != 0)
-      return err;
+      goto error;
   }
 
   /*  Finally, close all the superfluous descriptors */
@@ -444,9 +463,9 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
     if (pipes[fd][1] < 0)
       continue;
     
-    err = posix_spawn_file_actions_addclose(&actions, stdio_count + fd);
+    err = posix_spawn_file_actions_addclose(actions, stdio_count + fd);
     if (err != 0)
-      return err;
+      goto error;
   }
 
   /*  Finally process the standard streams as per de documentation */
@@ -458,10 +477,35 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
     if (pipes[fd][1] != -1) 
       continue;
     
-    err = posix_spawn_file_actions_addopen(&actions, fd, "/dev/null", oflags, mode);
+    err = posix_spawn_file_actions_addopen(actions, fd, "/dev/null", oflags, mode);
     if (err != 0)
-      return err;
-  } 
+      goto error;
+  }  
+
+  return err;
+
+error:
+  (void) posix_spawn_file_actions_destroy(actions);
+  return err;
+}
+
+int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
+                                         int stdio_count,
+                                         int (*pipes)[2], 
+                                         pid_t* pid) {
+  int err;
+  posix_spawnattr_t attrs;
+  posix_spawn_file_actions_t actions;
+
+  err = uv__spawn_set_posix_spawn_attrs(&attrs, options);
+  if (err != 0) 
+    goto error;
+
+  err = uv__spawn_set_posix_spawn_file_actions(&actions, options, stdio_count, pipes);
+  if (err != 0) {
+    (void) posix_spawnattr_destroy(&attrs);
+    goto error;
+  }
 
   /*  Preserve parent environment if not explicitly set */
   char** env = options->env ? options->env : environ;
@@ -473,6 +517,9 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
   (void) posix_spawn_file_actions_destroy(&actions);
   (void) posix_spawnattr_destroy(&attrs);
 
+error:
+  /* In an error situation, the attributes and file actions are 
+   * already destroyed, only the happy path requires cleanup */
   return UV__ERR(err);
 }
 #endif
