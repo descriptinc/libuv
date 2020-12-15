@@ -377,12 +377,15 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
 
   /* Set flags for spawn behavior 
     * 1) POSIX_SPAWN_CLOEXEC_DEFAULT: (Apple Extension) All descriptors in
-    * the parent will be treated as if they had been created with O_CLOEXEC. 
-    * The only fds that will be passed on to the child are those manipulated by the file actions
-    * 2) POSIX_SPAWN_SETSIGDEF: Signals mentioned in spawn-sigdefault in the spawn attributes
-    * will be reset to behave as their default
-    * 3) POSIX_SPAWN_SETSIGMASK: Signal mask will be set to the value of spawn-sigmask in attributes
-    * 4) POSIX_SPAWN_SETSID: Make the process a new session leader if a detached session was requested. */
+    * the parent will be treated as if they had been created with O_CLOEXEC.
+    * The only fds that will be passed on to the child are those manipulated
+    * by the file actions
+    * 2) POSIX_SPAWN_SETSIGDEF: Signals mentioned in spawn-sigdefault in
+    * the spawn attributes will be reset to behave as their default
+    * 3) POSIX_SPAWN_SETSIGMASK: Signal mask will be set to the value of
+    * spawn-sigmask in attributes
+    * 4) POSIX_SPAWN_SETSID: Make the process a new session leader if a
+    * detached session was requested. */
   flags = POSIX_SPAWN_CLOEXEC_DEFAULT |
     POSIX_SPAWN_SETSIGDEF |
     POSIX_SPAWN_SETSIGMASK;
