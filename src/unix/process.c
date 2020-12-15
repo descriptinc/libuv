@@ -36,6 +36,7 @@
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
 #include <spawn.h>
 #include <sys/kauth.h>
+#include <dlfcn.h>
 # include <crt_externs.h>
 # define environ (*_NSGetEnviron())
 #include "darwin-stub.h"
@@ -346,6 +347,19 @@ static void uv__process_child_init(const uv_process_options_t* options,
 #endif
 
 #if defined(__APPLE__)
+int uv__spawn_use_posix_spawn() {
+  if(dlsym(RTLD_DEFAULT, "posix_spawnattr_set_groups_np") == NULL)
+    return 0;
+
+  if(dlsym(RTLD_DEFAULT, "posix_spawnattr_set_uid_np") == NULL)
+    return 0;
+
+  if(dlsym(RTLD_DEFAULT, "posix_spawnattr_set_gid_np") == NULL)
+    return 0;
+
+  return 1;
+}
+
 int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs, 
                                     const uv_process_options_t* options)
 {
@@ -553,7 +567,7 @@ int uv__spawn_and_init_child(const uv_process_options_t* options,
                              pid_t* pid) {
 
 #if defined(__APPLE__) 
-  if (__builtin_available(macOS 10.15, *)) {
+  if (uv__spawn_use_posix_spawn()) {
     /* Especial child process spawn case for macOS Big Sur (11.0) onwards 
      *
      * Big Sur introduced a significant performance degradation on a call to
