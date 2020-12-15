@@ -469,6 +469,10 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
   /*  Spawn the child */
   err = posix_spawnp(pid, options->file, &actions, &attrs, options->args, env);
 
+  /* Destroy the actions/attributes */
+  (void) posix_spawn_file_actions_destroy(&actions);
+  (void) posix_spawnattr_destroy(&attrs);
+
   return UV__ERR(err);
 }
 #endif
