@@ -395,13 +395,13 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
   if (err != 0)
     return err;
 
-  // Reset all signal the child to their default behavior
+  /*  Reset all signal the child to their default behavior */
   sigfillset(&signal_set);
   err = posix_spawnattr_setsigdefault(&attrs, &signal_set);
   if (err != 0) 
     return err;
 
-  // Reset the signal mask for all signals
+  /*  Reset the signal mask for all signals */
   sigemptyset(&signal_set);
   err = posix_spawnattr_setsigmask(&attrs, &signal_set);
   if (err != 0)
@@ -414,8 +414,8 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
   if (options->cwd != NULL && posix_spawn_file_actions_addchdir_np(&actions, options->cwd))
     return err;
 
-  // First, dupe any required fd into orbit, out of the range of 
-  // the descriptors that should be mapped in.
+  /* First, dupe any required fd into orbit, out of the range of 
+   * the descriptors that should be mapped in. */
   for(fd = 0 ; fd < stdio_count; ++fd) {
     if (pipes[fd][1] < 0)
       continue;
@@ -425,7 +425,7 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
       return err;
   }
 
-  // Second, move the descriptors into their respective places
+  /*  Second, move the descriptors into their respective places */
   for(fd = 0 ; fd < stdio_count; ++fd) {
     if (pipes[fd][1] < 0)
       continue;
@@ -435,7 +435,7 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
       return err;
   }
 
-  // Finally, close all the superfluous descriptors
+  /*  Finally, close all the superfluous descriptors */
   for(fd = 0; fd < stdio_count; ++fd) {
     if (pipes[fd][1] < 0)
       continue;
@@ -445,9 +445,9 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
       return err;
   }
 
-  // Finally process the standard streams as per de documentation
+  /*  Finally process the standard streams as per de documentation */
   for(fd = 0 ; fd < 3 ; ++fd) {
-    // If ignored, open as /dev/null
+    /*  If ignored, open as /dev/null */
     const int oflags = fd == 0 ? O_RDONLY : O_RDWR;
     const int mode = 0;
 
@@ -459,10 +459,10 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
       return err;
   } 
 
-  // Preserve parent environment if not explicitly set
+  /*  Preserve parent environment if not explicitly set */
   char ** env = options->env ? options->env : environ;
 
-  // Spawn the child
+  /*  Spawn the child */
   err = posix_spawnp(pid, options->file, &actions, &attrs, options->args, env);
 
   return UV__ERR(err);
