@@ -464,7 +464,7 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
   } 
 
   /*  Preserve parent environment if not explicitly set */
-  char ** env = options->env ? options->env : environ;
+  char** env = options->env ? options->env : environ;
 
   /*  Spawn the child */
   err = posix_spawnp(pid, options->file, &actions, &attrs, options->args, env);
