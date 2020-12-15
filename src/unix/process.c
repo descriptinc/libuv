@@ -358,18 +358,18 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
   unsigned int flags;
 
   err = posix_spawnattr_init(&attrs);
-  if(err != 0)
+  if (err != 0)
     return err;
 
   if (options->flags & UV_PROCESS_SETUID) 
-    if(posix_spawnattr_set_uid_np(&attrs, options->uid) != 0)
+    if (posix_spawnattr_set_uid_np(&attrs, options->uid) != 0)
       return err;
 
   if (options->flags & UV_PROCESS_SETGID) 
     if (posix_spawnattr_set_gid_np(&attrs, options->gid) != 0) 
       return err;
 
-  if(options->flags & (UV_PROCESS_SETUID | UV_PROCESS_SETGID)) {
+  if (options->flags & (UV_PROCESS_SETUID | UV_PROCESS_SETGID)) {
     /* See the comment on the call to setgroups in uv__process_child_init above
       * for why this is not a fatal error */
     SAVE_ERRNO(posix_spawnattr_set_groups_np(&attrs, 0, NULL, KAUTH_UID_NONE));
@@ -386,26 +386,26 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
   flags = POSIX_SPAWN_CLOEXEC_DEFAULT |
     POSIX_SPAWN_SETSIGDEF |
     POSIX_SPAWN_SETSIGMASK;
-  if(options->flags & UV_PROCESS_DETACHED) 
+  if (options->flags & UV_PROCESS_DETACHED) 
     flags |= POSIX_SPAWN_SETSID;
   err = posix_spawnattr_setflags(&attrs, flags);
-  if(err != 0)
+  if (err != 0)
     return err;
 
   // Reset all signal the child to their default behavior
   sigfillset(&signal_set);
   err = posix_spawnattr_setsigdefault(&attrs, &signal_set);
-  if(err != 0) 
+  if (err != 0) 
     return err;
 
   // Reset the signal mask for all signals
   sigemptyset(&signal_set);
   err = posix_spawnattr_setsigmask(&attrs, &signal_set);
-  if(err != 0)
+  if (err != 0)
     return err;
 
   err = posix_spawn_file_actions_init(&actions);
-  if(err != 0)
+  if (err != 0)
     return err;
 
   if (options->cwd != NULL && posix_spawn_file_actions_addchdir_np(&actions, options->cwd))
@@ -414,31 +414,31 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
   // First, dupe any required fd into orbit, out of the range of 
   // the descriptors that should be mapped in.
   for(fd = 0 ; fd < stdio_count; ++fd) {
-    if(pipes[fd][1] < 0)
+    if (pipes[fd][1] < 0)
       continue;
     
     err = posix_spawn_file_actions_adddup2(&actions, pipes[fd][1], stdio_count + fd);
-    if(err != 0)
+    if (err != 0)
       return err;
   }
 
   // Second, move the descriptors into their respective places
   for(fd = 0 ; fd < stdio_count; ++fd) {
-    if(pipes[fd][1] < 0)
+    if (pipes[fd][1] < 0)
       continue;
 
     err = posix_spawn_file_actions_adddup2(&actions, stdio_count + fd, fd);
-    if(err != 0)
+    if (err != 0)
       return err;
   }
 
   // Finally, close all the superfluous descriptors
   for(fd = 0; fd < stdio_count; ++fd) {
-    if(pipes[fd][1] < 0)
+    if (pipes[fd][1] < 0)
       continue;
     
     err = posix_spawn_file_actions_addclose(&actions, stdio_count + fd);
-    if(err != 0)
+    if (err != 0)
       return err;
   }
 
@@ -448,11 +448,11 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
     const int oflags = fd == 0 ? O_RDONLY : O_RDWR;
     const int mode = 0;
 
-    if(pipes[fd][1] != -1) 
+    if (pipes[fd][1] != -1) 
       continue;
     
     err = posix_spawn_file_actions_addopen(&actions, fd, "/dev/null", oflags, mode);
-    if(err != 0)
+    if (err != 0)
       return err;
   } 
 
@@ -495,7 +495,7 @@ int uv__spawn_and_init_child(const uv_process_options_t* options,
                              pid_t* pid) {
 
 #if defined(__APPLE__) 
-  if(__builtin_available(macOS 10.15, *)) {
+  if (__builtin_available(macOS 10.15, *)) {
     /* Especial child process spawn case for macOS Big Sur (11.0) onwards 
      *
      * Big Sur introduced a significant performance degradation on a call to
@@ -605,7 +605,7 @@ int uv_spawn(uv_loop_t* loop,
 
   /* Spawn the child */
   err = uv__spawn_and_init_child(options, stdio_count, pipes, signal_pipe[1], &pid);
-  if(err != 0) {
+  if (err != 0) {
     uv_rwlock_wrunlock(&loop->cloexec_lock);
     uv__close(signal_pipe[0]);
     uv__close(signal_pipe[1]);
