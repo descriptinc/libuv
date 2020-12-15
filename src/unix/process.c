@@ -347,20 +347,35 @@ static void uv__process_child_init(const uv_process_options_t* options,
 #endif
 
 #if defined(__APPLE__)
-int uv__spawn_use_posix_spawn() {
-  if(dlsym(RTLD_DEFAULT, "posix_spawnattr_set_groups_np") == NULL)
-    return 0;
 
-  if(dlsym(RTLD_DEFAULT, "posix_spawnattr_set_uid_np") == NULL)
-    return 0;
+typedef struct uv__posix_spawn_fncs_tag {
+  struct {
+    int (*set_uid_np)(const posix_spawnattr_t *, uid_t);
+    int (*set_gid_np)(const posix_spawnattr_t *, gid_t);
+    int (*set_groups_np)(const posix_spawnattr_t*, int, gid_t*, uid_t);
+  } spawnattr;
 
-  if(dlsym(RTLD_DEFAULT, "posix_spawnattr_set_gid_np") == NULL)
-    return 0;
+  struct {
+    int (*addchdir_np)(const posix_spawn_file_actions_t *, const char *);
+  } file_actions;
+} uv__posix_spawn_fncs_t;
 
-  return 1;
+int uv__spawn_use_posix_spawn(uv__posix_spawn_fncs_t* fncs) {
+  /* Try to locate all non-portable functions at runtime */
+  fncs->spawnattr.set_uid_np = dlsym(RTLD_DEFAULT, "posix_spawnattr_set_uid_np");
+  fncs->spawnattr.set_gid_np = dlsym(RTLD_DEFAULT, "posix_spawnattr_set_gid_np");
+  fncs->spawnattr.set_groups_np = dlsym(RTLD_DEFAULT, "posix_spawnattr_set_groups_np");
+  fncs->file_actions.addchdir_np = dlsym(RTLD_DEFAULT, "posix_spawn_file_actions_addchdir_np");
+
+  /* If any of these is missing, just don't use posix_spawn */
+  return fncs->spawnattr.set_gid_np != NULL && 
+         fncs->spawnattr.set_uid_np != NULL && 
+         fncs->spawnattr.set_groups_np != NULL &&
+         fncs->file_actions.addchdir_np != NULL;
 }
 
-int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs, 
+int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs,
+                                    const uv__posix_spawn_fncs_t* posix_spawn_fncs,
                                     const uv_process_options_t* options)
 {
   int err;
@@ -374,13 +389,13 @@ int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs,
   }
 
   if (options->flags & UV_PROCESS_SETUID) {
-    err = posix_spawnattr_set_uid_np(attrs, options->uid);
+    err = posix_spawn_fncs->spawnattr.set_uid_np(attrs, options->uid);
     if (err != 0)
       goto error;
   }
 
   if (options->flags & UV_PROCESS_SETGID) {
-    err = posix_spawnattr_set_gid_np(attrs, options->gid);
+    err = posix_spawn_fncs->spawnattr.set_gid_np(attrs, options->gid);
     if (err != 0) 
       goto error;
   }
@@ -388,7 +403,7 @@ int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs,
   if (options->flags & (UV_PROCESS_SETUID | UV_PROCESS_SETGID)) {
     /* See the comment on the call to setgroups in uv__process_child_init above
       * for why this is not a fatal error */
-    SAVE_ERRNO(posix_spawnattr_set_groups_np(attrs, 0, NULL, KAUTH_UID_NONE));
+    SAVE_ERRNO(posix_spawn_fncs->spawnattr.set_groups_np(attrs, 0, NULL, KAUTH_UID_NONE));
   }
 
   /* Set flags for spawn behavior 
@@ -431,6 +446,7 @@ error:
 }
 
 int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
+                                           const uv__posix_spawn_fncs_t* posix_spawn_fncs,
                                            const uv_process_options_t* options,
                                            int stdio_count,
                                            int (*pipes)[2])
@@ -446,7 +462,7 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
 
   /* Set the current working directory if requested */
   if (options->cwd != NULL) {
-    err = posix_spawn_file_actions_addchdir_np(actions, options->cwd);
+    err = posix_spawn_fncs->file_actions.addchdir_np(actions, options->cwd);
     if (err != 0)
       goto error;
   }
@@ -506,16 +522,17 @@ error:
 int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
                                          int stdio_count,
                                          int (*pipes)[2], 
-                                         pid_t* pid) {
+                                         pid_t* pid,
+                                         const uv__posix_spawn_fncs_t* posix_spawn_fncs) {
   int err;
   posix_spawnattr_t attrs;
   posix_spawn_file_actions_t actions;
 
-  err = uv__spawn_set_posix_spawn_attrs(&attrs, options);
+  err = uv__spawn_set_posix_spawn_attrs(&attrs, posix_spawn_fncs, options);
   if (err != 0) 
     goto error;
 
-  err = uv__spawn_set_posix_spawn_file_actions(&actions, options, stdio_count, pipes);
+  err = uv__spawn_set_posix_spawn_file_actions(&actions, posix_spawn_fncs, options, stdio_count, pipes);
   if (err != 0) {
     (void) posix_spawnattr_destroy(&attrs);
     goto error;
@@ -567,7 +584,8 @@ int uv__spawn_and_init_child(const uv_process_options_t* options,
                              pid_t* pid) {
 
 #if defined(__APPLE__) 
-  if (uv__spawn_use_posix_spawn()) {
+  uv__posix_spawn_fncs_t posix_spawn_fncs;
+  if (uv__spawn_use_posix_spawn(&posix_spawn_fncs)) {
     /* Especial child process spawn case for macOS Big Sur (11.0) onwards 
      *
      * Big Sur introduced a significant performance degradation on a call to
@@ -584,7 +602,11 @@ int uv__spawn_and_init_child(const uv_process_options_t* options,
      * 
      * see https://github.com/libuv/libuv/issues/3050
      */
-    return uv__spawn_and_init_child_posix_spawn(options, stdio_count, pipes, pid);
+    return uv__spawn_and_init_child_posix_spawn(options,
+                                                stdio_count,
+                                                pipes,
+                                                pid,
+                                                &posix_spawn_fncs);
   } else {
 #endif  
     return uv__spawn_and_init_child_fork(options, stdio_count, pipes, error_fd, pid);

@@ -111,9 +111,4 @@ static const int kFSEventStreamEventFlagRootChanged = 32;
 static const int kFSEventStreamEventFlagUnmount = 128;
 static const int kFSEventStreamEventFlagUserDropped = 2;
 
-/* Copied from https://opensource.apple.com/source/xnu/xnu-6153.101.6/libsyscall/wrappers/spawn/spawn_private.h.auto.html */
-int posix_spawnattr_set_uid_np(const posix_spawnattr_t*, uid_t);
-int posix_spawnattr_set_gid_np(const posix_spawnattr_t*, gid_t);
-int posix_spawnattr_set_groups_np(const posix_spawnattr_t*, int, gid_t*, uid_t);
-
 #endif  /* UV_DARWIN_STUB_H_ */
