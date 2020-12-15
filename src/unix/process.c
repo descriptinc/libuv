@@ -411,8 +411,12 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
   if (err != 0)
     return err;
 
-  if (options->cwd != NULL && posix_spawn_file_actions_addchdir_np(&actions, options->cwd))
-    return err;
+  /* Set the current working directory if requested */
+  if (options->cwd != NULL) {
+    err = posix_spawn_file_actions_addchdir_np(&actions, options->cwd);
+    if (err != 0)
+      return err;
+  }
 
   /* First, dupe any required fd into orbit, out of the range of 
    * the descriptors that should be mapped in. */
