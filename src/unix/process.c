@@ -501,8 +501,10 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
   /*  Finally process the standard streams as per documentation */
   for (fd = 0 ; fd < 3 ; fd++) {
     /*  If ignored, open as /dev/null */
-    const int oflags = fd == 0 ? O_RDONLY : O_RDWR;
+    int oflags;
     const int mode = 0;
+
+    oflags = fd == 0 ? O_RDONLY : O_RDWR;
 
     if (pipes[fd][1] != -1) 
       continue;
