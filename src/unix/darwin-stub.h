@@ -23,7 +23,6 @@
 #define UV_DARWIN_STUB_H_
 
 #include <stdint.h>
-#include <spawn.h>
 
 struct CFArrayCallBacks;
 struct CFRunLoopSourceContext;
