@@ -467,7 +467,7 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
       goto error;
   }
 
-  /* First, dupe any required fd into orbit, out of the range of 
+  /* First, duplicate any required fd into orbit, out of the range of 
    * the descriptors that should be mapped in. */
   for (fd = 0; fd < stdio_count; fd++) {
     if (pipes[fd][1] < 0)
@@ -498,7 +498,7 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
       goto error;
   }
 
-  /*  Finally process the standard streams as per de documentation */
+  /*  Finally process the standard streams as per documentation */
   for (fd = 0 ; fd < 3 ; fd++) {
     /*  If ignored, open as /dev/null */
     const int oflags = fd == 0 ? O_RDONLY : O_RDWR;
