@@ -469,7 +469,7 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
 
   /* First, dupe any required fd into orbit, out of the range of 
    * the descriptors that should be mapped in. */
-  for(fd = 0 ; fd < stdio_count; ++fd) {
+  for (fd = 0; fd < stdio_count; fd++) {
     if (pipes[fd][1] < 0)
       continue;
     
@@ -479,7 +479,7 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
   }
 
   /*  Second, move the descriptors into their respective places */
-  for(fd = 0 ; fd < stdio_count; ++fd) {
+  for (fd = 0; fd < stdio_count; fd++) {
     if (pipes[fd][1] < 0)
       continue;
 
@@ -489,7 +489,7 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
   }
 
   /*  Finally, close all the superfluous descriptors */
-  for(fd = 0; fd < stdio_count; ++fd) {
+  for (fd = 0; fd < stdio_count; fd++) {
     if (pipes[fd][1] < 0)
       continue;
     
@@ -499,7 +499,7 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
   }
 
   /*  Finally process the standard streams as per de documentation */
-  for(fd = 0 ; fd < 3 ; ++fd) {
+  for (fd = 0 ; fd < 3 ; fd++) {
     /*  If ignored, open as /dev/null */
     const int oflags = fd == 0 ? O_RDONLY : O_RDWR;
     const int mode = 0;
