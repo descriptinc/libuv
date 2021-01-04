@@ -601,8 +601,6 @@ int uv__spawn_and_init_child(const uv_process_options_t* options,
      * logic with poxis_spawn and its related primitves. It also takes advantage of 
      * the macOS extension POSIX_SPAWN_CLOEXEC_DEFAULT that makes impossible to
      * leak descriptors to the child process.
-     * 
-     * see https://github.com/libuv/libuv/issues/3050
      */
     return uv__spawn_and_init_child_posix_spawn(options,
                                                 stdio_count,
