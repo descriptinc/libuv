@@ -407,9 +407,16 @@ int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs,
   }
 
   if (options->flags & (UV_PROCESS_SETUID | UV_PROCESS_SETGID)) {
+    /* Using ngroups = 0 implied the group_array is empty, and so 
+     * its contents are never traversed. Still the 
+     * posix_spawn_set_groups_np function seems to require that the 
+     * group_array pointer be non-null */
+    const int ngroups = 0;
+    gid_t group_array = KAUTH_GID_NONE;
+    
     /* See the comment on the call to setgroups in uv__process_child_init above
-      * for why this is not a fatal error */
-    SAVE_ERRNO(posix_spawn_fncs->spawnattr.set_groups_np(attrs, 0, NULL, KAUTH_UID_NONE));
+     * for why this is not a fatal error */
+    SAVE_ERRNO(posix_spawn_fncs->spawnattr.set_groups_np(attrs, ngroups, &group_array, KAUTH_UID_NONE));
   }
 
   /* Set flags for spawn behavior 
