@@ -514,7 +514,7 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
       goto error;
   }  
 
-  return err;
+  return 0;
 
 error:
   (void) posix_spawn_file_actions_destroy(actions);
