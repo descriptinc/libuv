@@ -34,12 +34,12 @@
 #include <poll.h>
 
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
-#include <spawn.h>
-#include <sys/kauth.h>
-#include <dlfcn.h>
+# include <spawn.h>
+# include <sys/kauth.h>
+# include <dlfcn.h>
 # include <crt_externs.h>
 # define environ (*_NSGetEnviron())
-#include "darwin-stub.h"
+# include "darwin-stub.h"
 #else
 extern char **environ;
 #endif
