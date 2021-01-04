@@ -607,12 +607,9 @@ int uv__spawn_and_init_child(const uv_process_options_t* options,
                                                 pipes,
                                                 pid,
                                                 &posix_spawn_fncs);
-  } else {
-#endif  
-    return uv__spawn_and_init_child_fork(options, stdio_count, pipes, error_fd, pid);
-#if defined(__APPLE__) 
   }
-#endif
+#endif  
+  return uv__spawn_and_init_child_fork(options, stdio_count, pipes, error_fd, pid);
 }
 
 int uv_spawn(uv_loop_t* loop,
