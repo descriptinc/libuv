@@ -48,7 +48,6 @@ extern char **environ;
 # include <grp.h>
 #endif
 
-
 static void uv__chld(uv_signal_t* handle, int signum) {
   uv_process_t* process;
   uv_loop_t* loop;
@@ -347,7 +346,6 @@ static void uv__process_child_init(const uv_process_options_t* options,
 #endif
 
 #if defined(__APPLE__)
-
 typedef struct uv__posix_spawn_fncs_tag {
   struct {
     int (*set_uid_np)(const posix_spawnattr_t *, uid_t);
@@ -359,6 +357,10 @@ typedef struct uv__posix_spawn_fncs_tag {
     int (*addchdir_np)(const posix_spawn_file_actions_t *, const char *);
   } file_actions;
 } uv__posix_spawn_fncs_t;
+
+static uv_once_t posix_spawn_init_fncs_once = UV_ONCE_INIT;
+static uv__posix_spawn_fncs_t posix_spawn_fncs;
+static int use_posix_spawn = 0;
 
 int uv__spawn_use_posix_spawn(uv__posix_spawn_fncs_t* fncs) {
   /* Try to locate all non-portable functions at runtime */
@@ -372,6 +374,10 @@ int uv__spawn_use_posix_spawn(uv__posix_spawn_fncs_t* fncs) {
          fncs->spawnattr.set_uid_np != NULL && 
          fncs->spawnattr.set_groups_np != NULL &&
          fncs->file_actions.addchdir_np != NULL;
+}
+
+void uv__spawn_init_use_posix_spawn_once() {
+  use_posix_spawn = uv__spawn_use_posix_spawn(&posix_spawn_fncs);
 }
 
 int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs,
@@ -586,8 +592,8 @@ int uv__spawn_and_init_child(const uv_process_options_t* options,
                              pid_t* pid) {
 
 #if defined(__APPLE__) 
-  uv__posix_spawn_fncs_t posix_spawn_fncs;
-  if (uv__spawn_use_posix_spawn(&posix_spawn_fncs)) {
+  uv_once(&posix_spawn_init_fncs_once, uv__spawn_init_use_posix_spawn_once);
+  if (use_posix_spawn) {
     /* Especial child process spawn case for macOS Big Sur (11.0) onwards 
      *
      * Big Sur introduced a significant performance degradation on a call to
