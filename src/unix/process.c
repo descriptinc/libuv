@@ -345,6 +345,7 @@ static void uv__process_child_init(const uv_process_options_t* options,
 }
 #endif
 
+
 #if defined(__APPLE__)
 typedef struct uv__posix_spawn_fncs_tag {
   struct {
@@ -358,8 +359,10 @@ typedef struct uv__posix_spawn_fncs_tag {
   } file_actions;
 } uv__posix_spawn_fncs_t;
 
+
 static uv_once_t posix_spawn_init_fncs_once = UV_ONCE_INIT;
 static uv__posix_spawn_fncs_t posix_spawn_fncs;
+
 
 void uv__spawn_init_posix_spawn_fncs() {
   /* Try to locate all non-portable functions at runtime */
@@ -369,10 +372,10 @@ void uv__spawn_init_posix_spawn_fncs() {
   posix_spawn_fncs.file_actions.addchdir_np = dlsym(RTLD_DEFAULT, "posix_spawn_file_actions_addchdir_np");
 }
 
+
 int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs,
                                     const uv__posix_spawn_fncs_t* posix_spawn_fncs,
-                                    const uv_process_options_t* options)
-{
+                                    const uv_process_options_t* options) {
   int err;
   unsigned int flags;
   sigset_t signal_set;
@@ -462,12 +465,12 @@ error:
   return err;
 }
 
+
 int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
                                            const uv__posix_spawn_fncs_t* posix_spawn_fncs,
                                            const uv_process_options_t* options,
                                            int stdio_count,
-                                           int (*pipes)[2])
-{
+                                           int (*pipes)[2]) {
   int fd;
   int err;
 
@@ -542,6 +545,7 @@ error:
   (void) posix_spawn_file_actions_destroy(actions);
   return err;
 }
+
 
 int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
                                          int stdio_count,
@@ -621,10 +625,9 @@ int uv__spawn_and_init_child(const uv_process_options_t* options,
    * 
    * On macOS, though, posix_spawn is implemented in a way that does not 
    * exhibit the problem. This block implements the forking and preparation
-   * logic with poxis_spawn and its related primitves. It also takes advantage of 
+   * logic with posix_spawn and its related primitves. It also takes advantage of
    * the macOS extension POSIX_SPAWN_CLOEXEC_DEFAULT that makes impossible to
-   * leak descriptors to the child process.
-   */
+   * leak descriptors to the child process. */
   err = uv__spawn_and_init_child_posix_spawn(options,
                                               stdio_count,
                                               pipes,
@@ -634,7 +637,7 @@ int uv__spawn_and_init_child(const uv_process_options_t* options,
   /* The posix_spawn flow will return UV_ENOSYS if any of the posix_spawn_x_np
    * non-standard functions is both _needed_ and _undefined_. In those cases, 
    * default back to the fork/execve strategy. For all other errors, just fail. */
-  if(err != UV_ENOSYS) {
+  if (err != UV_ENOSYS) {
     return err;
   } 
 #endif  
