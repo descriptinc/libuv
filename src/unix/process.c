@@ -360,24 +360,13 @@ typedef struct uv__posix_spawn_fncs_tag {
 
 static uv_once_t posix_spawn_init_fncs_once = UV_ONCE_INIT;
 static uv__posix_spawn_fncs_t posix_spawn_fncs;
-static int use_posix_spawn = 0;
 
-int uv__spawn_use_posix_spawn(uv__posix_spawn_fncs_t* fncs) {
+void uv__spawn_init_posix_spawn_fncs() {
   /* Try to locate all non-portable functions at runtime */
-  fncs->spawnattr.set_uid_np = dlsym(RTLD_DEFAULT, "posix_spawnattr_set_uid_np");
-  fncs->spawnattr.set_gid_np = dlsym(RTLD_DEFAULT, "posix_spawnattr_set_gid_np");
-  fncs->spawnattr.set_groups_np = dlsym(RTLD_DEFAULT, "posix_spawnattr_set_groups_np");
-  fncs->file_actions.addchdir_np = dlsym(RTLD_DEFAULT, "posix_spawn_file_actions_addchdir_np");
-
-  /* If any of these is missing, just don't use posix_spawn */
-  return fncs->spawnattr.set_gid_np != NULL && 
-         fncs->spawnattr.set_uid_np != NULL && 
-         fncs->spawnattr.set_groups_np != NULL &&
-         fncs->file_actions.addchdir_np != NULL;
-}
-
-void uv__spawn_init_use_posix_spawn_once() {
-  use_posix_spawn = uv__spawn_use_posix_spawn(&posix_spawn_fncs);
+  posix_spawn_fncs.spawnattr.set_uid_np = dlsym(RTLD_DEFAULT, "posix_spawnattr_set_uid_np");
+  posix_spawn_fncs.spawnattr.set_gid_np = dlsym(RTLD_DEFAULT, "posix_spawnattr_set_gid_np");
+  posix_spawn_fncs.spawnattr.set_groups_np = dlsym(RTLD_DEFAULT, "posix_spawnattr_set_groups_np");
+  posix_spawn_fncs.file_actions.addchdir_np = dlsym(RTLD_DEFAULT, "posix_spawn_file_actions_addchdir_np");
 }
 
 int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs,
@@ -395,12 +384,22 @@ int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs,
   }
 
   if (options->flags & UV_PROCESS_SETUID) {
+    if (posix_spawn_fncs->spawnattr.set_uid_np == NULL) {
+      err = UV_ENOSYS;
+      goto error;
+    }
+
     err = posix_spawn_fncs->spawnattr.set_uid_np(attrs, options->uid);
     if (err != 0)
       goto error;
   }
 
   if (options->flags & UV_PROCESS_SETGID) {
+    if (posix_spawn_fncs->spawnattr.set_gid_np == NULL) {
+      err = UV_ENOSYS;
+      goto error;
+    }
+
     err = posix_spawn_fncs->spawnattr.set_gid_np(attrs, options->gid);
     if (err != 0) 
       goto error;
@@ -413,6 +412,11 @@ int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs,
      * group_array pointer be non-null */
     const int ngroups = 0;
     gid_t group_array = KAUTH_GID_NONE;
+
+    if (posix_spawn_fncs->spawnattr.set_groups_np == NULL) {
+      err = UV_ENOSYS;
+      goto error;
+    }
     
     /* See the comment on the call to setgroups in uv__process_child_init above
      * for why this is not a fatal error */
@@ -475,6 +479,11 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
 
   /* Set the current working directory if requested */
   if (options->cwd != NULL) {
+    if (posix_spawn_fncs->file_actions.addchdir_np == NULL) {
+      err = UV_ENOSYS;
+      goto error;
+    }
+
     err = posix_spawn_fncs->file_actions.addchdir_np(actions, options->cwd);
     if (err != 0)
       goto error;
@@ -597,32 +606,41 @@ int uv__spawn_and_init_child(const uv_process_options_t* options,
                              int (*pipes)[2],
                              int error_fd,
                              pid_t* pid) {
+  int err = 0;
 
 #if defined(__APPLE__) 
-  uv_once(&posix_spawn_init_fncs_once, uv__spawn_init_use_posix_spawn_once);
-  if (use_posix_spawn) {
-    /* Especial child process spawn case for macOS Big Sur (11.0) onwards 
-     *
-     * Big Sur introduced a significant performance degradation on a call to
-     * fork/exec when the process has many pages mmaped in with MAP_JIT, like, say
-     * a javascript interpreter. Electron-based applications, for example,
-     * are impacted; though the magnitude of the impact depends on how much the
-     * app relies on subprocesses. 
-     * 
-     * On macOS, though, posix_spawn is implemented in a way that does not 
-     * exhibit the problem. This block implements the forking and preparation
-     * logic with poxis_spawn and its related primitves. It also takes advantage of 
-     * the macOS extension POSIX_SPAWN_CLOEXEC_DEFAULT that makes impossible to
-     * leak descriptors to the child process.
-     */
-    return uv__spawn_and_init_child_posix_spawn(options,
-                                                stdio_count,
-                                                pipes,
-                                                pid,
-                                                &posix_spawn_fncs);
-  }
+  uv_once(&posix_spawn_init_fncs_once, uv__spawn_init_posix_spawn_fncs);
+
+  /* Especial child process spawn case for macOS Big Sur (11.0) onwards 
+   *
+   * Big Sur introduced a significant performance degradation on a call to
+   * fork/exec when the process has many pages mmaped in with MAP_JIT, like, say
+   * a javascript interpreter. Electron-based applications, for example,
+   * are impacted; though the magnitude of the impact depends on how much the
+   * app relies on subprocesses. 
+   * 
+   * On macOS, though, posix_spawn is implemented in a way that does not 
+   * exhibit the problem. This block implements the forking and preparation
+   * logic with poxis_spawn and its related primitves. It also takes advantage of 
+   * the macOS extension POSIX_SPAWN_CLOEXEC_DEFAULT that makes impossible to
+   * leak descriptors to the child process.
+   */
+  err = uv__spawn_and_init_child_posix_spawn(options,
+                                              stdio_count,
+                                              pipes,
+                                              pid,
+                                              &posix_spawn_fncs);
+
+  /* The posix_spawn flow will return UV_ENOSYS if any of the posix_spawn_x_np
+   * non-standard functions is both _needed_ and _undefined_. In those cases, 
+   * default back to the fork/execve strategy. For all other errors, just fail. */
+  if(err != UV_ENOSYS) {
+    return err;
+  } 
 #endif  
-  return uv__spawn_and_init_child_fork(options, stdio_count, pipes, error_fd, pid);
+  err = uv__spawn_and_init_child_fork(options, stdio_count, pipes, error_fd, pid);
+
+  return err;
 }
 
 int uv_spawn(uv_loop_t* loop,
