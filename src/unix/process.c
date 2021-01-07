@@ -546,6 +546,49 @@ error:
   return err;
 }
 
+int uv__spawn_resolve_path(const char* file, char** env, char* resolved_path, unsigned int resolved_path_length) {
+
+  if (*file == '\0') {
+    return UV_ENOENT;
+  }
+
+  /* */
+  char** env_it = env;
+  char* path = NULL;
+  while(*env_it != NULL) {
+    const char* var = *env_it;
+
+    /* Look for "PATH=" at the beginning of the env var definition */ 
+    const char* name = ststr(var, "PATH=");
+    if(name != NULL || name == var) {
+      path = var;
+      break;
+    }
+
+    ++env_it;
+  }
+
+  /* Find a slash char in the file */
+  const char* slash = strchr(file, '/');
+
+  /* If no PATH env var was defined in the environment, but
+   * there is no slash in the file, the fork/execvp flow woul
+   * resolve the file from an _empty_ PATH, but in the posix_spawn
+   * flow we have no way of imitating this: the resolution will
+   * always occur in the environment of the parent process, and hence
+   * it will inherit its PATH (if any). The only _safe_ thing we 
+   * can do is to fail and fall back to the fork/exec flow */
+  if (path == NULL && slash == NULL) {
+    return UV_ENOSYS;
+  } 
+  
+  /* If the file contains a slash, do not try resolve, as posix_spawn/execve
+   * would not do it either */
+  if (slash != NULL) {
+    strncpy(resolved_path, resolved_path_length, file);
+    return 0;
+  }
+}
 
 int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
                                          int stdio_count,
@@ -566,11 +609,35 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
     goto error;
   }
 
-  /*  Preserve parent environment if not explicitly set */
-  char** env = options->env ? options->env : environ;
+  /* Preserve parent environment if not explicitly set */
+  char** env = environ;
+
+  /* Emulate the execvp resolution of the options->file executable
+   * using the provided environment if any. */
+  const char resolved_file[PATH_MAX];
+  const char file = options->file;
+  if (options->env != NULL) {
+    /* Set the environment _for the child process_ */
+    env = options->env;
+
+    /* Try to resolve the file path in the context of the 
+     * _given environment_, as that is what is done in the fork() flow,
+     * by replacing the environ pointer with options->env after the fork
+     * but before the execvp call. */
+    err = resolve_path(options->file, env, resolved_file, PATH_MAX);
+    if (err != 0) {
+      (void) posix_spawnattr_destroy(&attrs);
+      goto error;
+    }
+
+    file = resolved_file;
+  } else {
+    /* Just use the provided file path, if no env is provided */
+    file = options->file;
+  }
 
   /*  Spawn the child */
-  err = posix_spawnp(pid, options->file, &actions, &attrs, options->args, env);
+  err = posix_spawnp(pid, file, &actions, &attrs, options->args, env);
 
   /* Destroy the actions/attributes */
   (void) posix_spawn_file_actions_destroy(&actions);
