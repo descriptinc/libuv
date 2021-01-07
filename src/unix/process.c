@@ -570,12 +570,12 @@ int uv__spawn_resolve_and_spawn(const uv_process_options_t* options,
                                 posix_spawnattr_t* attrs,
                                 posix_spawn_file_actions_t* actions,
                                 pid_t* pid) {
-	const char *p, *z, *path = NULL;
-	size_t l, k;
+  const char *p, *z, *path = NULL;
+  size_t l, k;
   int err = -1;
 
   /* Short circuit for erroneous case */
-	if (options->file == NULL) 
+  if (options->file == NULL) 
     return UV_ENOENT;
 
   /* The environment for the child process is that of the parent unless overriden 
@@ -587,8 +587,8 @@ int uv__spawn_resolve_and_spawn(const uv_process_options_t* options,
 
   /* If options->file contains a slash, posix_spawn/posix_spawnp behave
    * the same, and don't involve PATH resolution at all */
-	if (strchr(options->file, '/') != NULL)
-		return posix_spawn(pid, options->file, actions, attrs, options->args, env);
+  if (strchr(options->file, '/') != NULL)
+    return posix_spawn(pid, options->file, actions, attrs, options->args, env);
 
   /* If no custom environment is to be used, the environment used for path 
    * resolution as well for the child process is that of the parent process */
@@ -605,46 +605,46 @@ int uv__spawn_resolve_and_spawn(const uv_process_options_t* options,
 
   /* If no path was provided in options->env, use the default value 
    * to look for the executable */
-	if (!path) 
+  if (!path) 
     path = _PATH_DEFPATH;
 
-	k = strnlen(options->file, NAME_MAX+1);
-	if (k > NAME_MAX) {
-		errno = ENAMETOOLONG;
-		return -1;
-	}
+  k = strnlen(options->file, NAME_MAX+1);
+  if (k > NAME_MAX) {
+    errno = ENAMETOOLONG;
+    return -1;
+  }
 
-	l = strnlen(path, PATH_MAX-1)+1;
+  l = strnlen(path, PATH_MAX-1)+1;
 
-	for(p=path; ; p=z) {
+  for(p=path; ; p=z) {
     /* Compose the new process file from the entry in the PATH
      * environment variable and the actual file name */
-		char b[l+k+1];
-		z = strchr(p, ':');
-		if (!z) 
+    char b[l+k+1];
+    z = strchr(p, ':');
+    if (!z) 
       z = p+strlen(p);
-		if ((size_t)(z-p) >= l) {
-			if (!*z++) 
+    if ((size_t)(z-p) >= l) {
+      if (!*z++) 
         break;
-			
+      
       continue;
-		}
-		memcpy(b, p, z-p);
-		b[z-p] = '/';
-		memcpy(b+(z-p)+(z>p), options->file, k+1);
+    }
+    memcpy(b, p, z-p);
+    b[z-p] = '/';
+    memcpy(b+(z-p)+(z>p), options->file, k+1);
 
     /* Try to spawn the new process file. If it fails with ENOENT, the
      * new process file is not in this PATH entry, continue with the next
      * PATH entry. Stop when  */
-		err = posix_spawn(pid, b, actions, attrs, options->args, env);
-		if (err != ENOENT) 
+    err = posix_spawn(pid, b, actions, attrs, options->args, env);
+    if (err != ENOENT) 
       return err;
 
-		if (!*z++) 
+    if (!*z++) 
       break;
-	}
+  }
 
-	return err;
+  return err;
 }
 
 int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
