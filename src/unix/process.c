@@ -586,14 +586,13 @@ int uv__spawn_resolve_and_spawn(const uv_process_options_t* options,
   }
 
   /* If options->file contains a slash, posix_spawn/posix_spawnp behave
-   * the same, and don't involve PATH resolution at all */
-  if (strchr(options->file, '/') != NULL)
-    return posix_spawn(pid, options->file, actions, attrs, options->args, env);
-
-  /* If no custom environment is to be used, the environment used for path 
-   * resolution as well for the child process is that of the parent process */
-  if (options->env == NULL) {
-    return posix_spawn(pid, options->file, actions, attrs, options->args, env);
+   * the same, and don't involve PATH resolution at all. Otherwise, if
+   * options->file does not include a slash, but no custom environment is 
+   * to be used, the environment used for path  resolution as well for the 
+   * child process is that of the parent process, so posix_spawnp is the
+   * way to go. */
+  if (strchr(options->file, '/') != NULL || options->env == NULL) {
+    return posix_spawnp(pid, options->file, actions, attrs, options->args, env);
   }
 
   /* Loof for the definition of PATH in the provided env */
