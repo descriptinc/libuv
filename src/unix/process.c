@@ -41,7 +41,6 @@
 # include <dlfcn.h>
 # include <crt_externs.h>
 # define environ (*_NSGetEnviron())
-# include "darwin-stub.h"
 #else
 extern char **environ;
 #endif
