@@ -527,18 +527,21 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
 
   /*  Finally process the standard streams as per documentation */
   for (fd = 0 ; fd < 3 ; fd++) {
-    /*  If ignored, open as /dev/null */
     int oflags;
     const int mode = 0;
 
     oflags = fd == 0 ? O_RDONLY : O_RDWR;
 
-    if (pipes[fd][1] != -1) 
-      continue;
+    if (pipes[fd][1] != -1) {
+      /* If not ignored, make sure the fd is marked as non-blocking */
+      uv__nonblock_fcntl(pipes[fd][1], 0);
+    } else {
+      /* If ignored, redirect to (or from) /dev/null, */
+      err = posix_spawn_file_actions_addopen(actions, fd, "/dev/null", oflags, mode);
+      if (err != 0)
+        goto error;
+    }
     
-    err = posix_spawn_file_actions_addopen(actions, fd, "/dev/null", oflags, mode);
-    if (err != 0)
-      goto error;
   }  
 
   return 0;
