@@ -595,10 +595,10 @@ int uv__spawn_resolve_and_spawn(const uv_process_options_t* options,
     return posix_spawnp(pid, options->file, actions, attrs, options->args, env);
   }
 
-  /* Loof for the definition of PATH in the provided env */
+  /* Look for the definition of PATH in the provided env */
   path = uv__spawn_find_path_in_env(options->env);
 
-  /* The followingresolution logic (execvpe emulation) is taken from 
+  /* The following resolution logic (execvpe emulation) is taken from 
    * https://github.com/JuliaLang/libuv/commit/9af3af617138d6a6de7d72819ed362996ff255d9
    * and adapted to work around our own situations */
 
@@ -634,7 +634,7 @@ int uv__spawn_resolve_and_spawn(const uv_process_options_t* options,
 
     /* Try to spawn the new process file. If it fails with ENOENT, the
      * new process file is not in this PATH entry, continue with the next
-     * PATH entry. Stop when  */
+     * PATH entry. */
     err = posix_spawn(pid, b, actions, attrs, options->args, env);
     if (err != ENOENT) 
       return err;
