@@ -364,7 +364,7 @@ static uv_once_t posix_spawn_init_fncs_once = UV_ONCE_INIT;
 static uv__posix_spawn_fncs_t posix_spawn_fncs;
 
 
-void uv__spawn_init_posix_spawn_fncs() {
+void uv__spawn_init_posix_spawn_fncs(void) {
   /* Try to locate all non-portable functions at runtime */
   posix_spawn_fncs.spawnattr.set_uid_np = 
     dlsym(RTLD_DEFAULT, "posix_spawnattr_set_uid_np");
