@@ -306,9 +306,8 @@ static void uv__process_child_init(const uv_process_options_t* options,
     _exit(127);
   }
 
-  if (options->env != NULL) {
+  if (options->env != NULL)
     environ = options->env;
-  }
 
   /* Reset signal disposition.  Use a hard-coded limit because NSIG
    * is not fixed on Linux: it's either 32, 34 or 64, depending on
@@ -367,10 +366,14 @@ static uv__posix_spawn_fncs_t posix_spawn_fncs;
 
 void uv__spawn_init_posix_spawn_fncs() {
   /* Try to locate all non-portable functions at runtime */
-  posix_spawn_fncs.spawnattr.set_uid_np = dlsym(RTLD_DEFAULT, "posix_spawnattr_set_uid_np");
-  posix_spawn_fncs.spawnattr.set_gid_np = dlsym(RTLD_DEFAULT, "posix_spawnattr_set_gid_np");
-  posix_spawn_fncs.spawnattr.set_groups_np = dlsym(RTLD_DEFAULT, "posix_spawnattr_set_groups_np");
-  posix_spawn_fncs.file_actions.addchdir_np = dlsym(RTLD_DEFAULT, "posix_spawn_file_actions_addchdir_np");
+  posix_spawn_fncs.spawnattr.set_uid_np = 
+    dlsym(RTLD_DEFAULT, "posix_spawnattr_set_uid_np");
+  posix_spawn_fncs.spawnattr.set_gid_np = 
+    dlsym(RTLD_DEFAULT, "posix_spawnattr_set_gid_np");
+  posix_spawn_fncs.spawnattr.set_groups_np = 
+    dlsym(RTLD_DEFAULT, "posix_spawnattr_set_groups_np");
+  posix_spawn_fncs.file_actions.addchdir_np = 
+    dlsym(RTLD_DEFAULT, "posix_spawn_file_actions_addchdir_np");
 }
 
 
@@ -424,7 +427,11 @@ int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs,
     
     /* See the comment on the call to setgroups in uv__process_child_init above
      * for why this is not a fatal error */
-    SAVE_ERRNO(posix_spawn_fncs->spawnattr.set_groups_np(attrs, ngroups, &group_array, KAUTH_UID_NONE));
+    SAVE_ERRNO(posix_spawn_fncs->spawnattr.set_groups_np(
+      attrs, 
+      ngroups, 
+      &group_array, 
+      KAUTH_UID_NONE));
   }
 
   /* Set flags for spawn behavior 
@@ -439,8 +446,8 @@ int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs,
     * 4) POSIX_SPAWN_SETSID: Make the process a new session leader if a
     * detached session was requested. */
   flags = POSIX_SPAWN_CLOEXEC_DEFAULT |
-    POSIX_SPAWN_SETSIGDEF |
-    POSIX_SPAWN_SETSIGMASK;
+          POSIX_SPAWN_SETSIGDEF |
+          POSIX_SPAWN_SETSIGMASK;
   if (options->flags & UV_PROCESS_DETACHED) 
     flags |= POSIX_SPAWN_SETSID;
   err = posix_spawnattr_setflags(attrs, flags);
@@ -499,7 +506,11 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
     if (pipes[fd][1] < 0)
       continue;
     
-    err = posix_spawn_file_actions_adddup2(actions, pipes[fd][1], stdio_count + fd);
+    err = posix_spawn_file_actions_adddup2(
+      actions, 
+      pipes[fd][1], 
+      stdio_count + fd
+    );
     if (err != 0)
       goto error;
   }
@@ -525,7 +536,7 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
   }
 
   /*  Finally process the standard streams as per documentation */
-  for (fd = 0 ; fd < 3 ; fd++) {
+  for (fd = 0; fd < 3; fd++) {
     int oflags;
     const int mode = 0;
 
@@ -536,7 +547,12 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
       uv__nonblock_fcntl(pipes[fd][1], 0);
     } else {
       /* If ignored, redirect to (or from) /dev/null, */
-      err = posix_spawn_file_actions_addopen(actions, fd, "/dev/null", oflags, mode);
+      err = posix_spawn_file_actions_addopen(
+        actions, 
+        fd, 
+        "/dev/null", 
+        oflags, 
+        mode);
       if (err != 0)
         goto error;
     }
@@ -583,9 +599,8 @@ int uv__spawn_resolve_and_spawn(const uv_process_options_t* options,
   /* The environment for the child process is that of the parent unless overriden 
    * by options->env */
   char** env = environ;
-  if (options->env != NULL) {
+  if (options->env != NULL)
     env = options->env;
-  }
 
   /* If options->file contains a slash, posix_spawn/posix_spawnp behave
    * the same, and don't involve PATH resolution at all. Otherwise, if
@@ -593,9 +608,8 @@ int uv__spawn_resolve_and_spawn(const uv_process_options_t* options,
    * to be used, the environment used for path  resolution as well for the 
    * child process is that of the parent process, so posix_spawnp is the
    * way to go. */
-  if (strchr(options->file, '/') != NULL || options->env == NULL) {
+  if (strchr(options->file, '/') != NULL || options->env == NULL)
     return posix_spawnp(pid, options->file, actions, attrs, options->args, env);
-  }
 
   /* Look for the definition of PATH in the provided env */
   path = uv__spawn_find_path_in_env(options->env);
@@ -617,7 +631,7 @@ int uv__spawn_resolve_and_spawn(const uv_process_options_t* options,
 
   l = strnlen(path, PATH_MAX-1)+1;
 
-  for(p=path; ; p=z) {
+  for(p = path;; p = z) {
     /* Compose the new process file from the entry in the PATH
      * environment variable and the actual file name */
     char b[l+k+1];
@@ -661,7 +675,12 @@ int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
   if (err != 0) 
     goto error;
 
-  err = uv__spawn_set_posix_spawn_file_actions(&actions, posix_spawn_fncs, options, stdio_count, pipes);
+  err = uv__spawn_set_posix_spawn_file_actions(
+    &actions,
+    posix_spawn_fncs,
+    options,
+    stdio_count,
+    pipes);
   if (err != 0) {
     (void) posix_spawnattr_destroy(&attrs);
     goto error;
@@ -714,7 +733,7 @@ int uv__spawn_and_init_child(const uv_process_options_t* options,
 #if defined(__APPLE__) 
   uv_once(&posix_spawn_init_fncs_once, uv__spawn_init_posix_spawn_fncs);
 
-  /* Especial child process spawn case for macOS Big Sur (11.0) onwards 
+  /* Special child process spawn case for macOS Big Sur (11.0) onwards 
    *
    * Big Sur introduced a significant performance degradation on a call to
    * fork/exec when the process has many pages mmaped in with MAP_JIT, like, say
@@ -724,7 +743,7 @@ int uv__spawn_and_init_child(const uv_process_options_t* options,
    * 
    * On macOS, though, posix_spawn is implemented in a way that does not 
    * exhibit the problem. This block implements the forking and preparation
-   * logic with posix_spawn and its related primitves. It also takes advantage of
+   * logic with posix_spawn and its related primitives. It also takes advantage of
    * the macOS extension POSIX_SPAWN_CLOEXEC_DEFAULT that makes impossible to
    * leak descriptors to the child process. */
   err = uv__spawn_and_init_child_posix_spawn(options,
@@ -736,9 +755,9 @@ int uv__spawn_and_init_child(const uv_process_options_t* options,
   /* The posix_spawn flow will return UV_ENOSYS if any of the posix_spawn_x_np
    * non-standard functions is both _needed_ and _undefined_. In those cases, 
    * default back to the fork/execve strategy. For all other errors, just fail. */
-  if (err != UV_ENOSYS) {
+  if (err != UV_ENOSYS)
     return err;
-  } 
+
 #endif  
   err = uv__spawn_and_init_child_fork(options, stdio_count, pipes, error_fd, pid);
 
