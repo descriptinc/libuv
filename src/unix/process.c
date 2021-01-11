@@ -392,7 +392,7 @@ int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs,
 
   if (options->flags & UV_PROCESS_SETUID) {
     if (posix_spawn_fncs->spawnattr.set_uid_np == NULL) {
-      err = UV_ENOSYS;
+      err = ENOSYS;
       goto error;
     }
 
@@ -403,7 +403,7 @@ int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs,
 
   if (options->flags & UV_PROCESS_SETGID) {
     if (posix_spawn_fncs->spawnattr.set_gid_np == NULL) {
-      err = UV_ENOSYS;
+      err = ENOSYS;
       goto error;
     }
 
@@ -421,7 +421,7 @@ int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs,
     gid_t group_array = KAUTH_GID_NONE;
 
     if (posix_spawn_fncs->spawnattr.set_groups_np == NULL) {
-      err = UV_ENOSYS;
+      err = ENOSYS;
       goto error;
     }
     
@@ -491,7 +491,7 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
   /* Set the current working directory if requested */
   if (options->cwd != NULL) {
     if (posix_spawn_fncs->file_actions.addchdir_np == NULL) {
-      err = UV_ENOSYS;
+      err = ENOSYS;
       goto error;
     }
 
@@ -594,7 +594,7 @@ int uv__spawn_resolve_and_spawn(const uv_process_options_t* options,
 
   /* Short circuit for erroneous case */
   if (options->file == NULL) 
-    return UV_ENOENT;
+    return ENOENT;
 
   /* The environment for the child process is that of the parent unless overriden 
    * by options->env */
