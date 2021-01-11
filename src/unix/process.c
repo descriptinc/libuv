@@ -509,8 +509,7 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
     err = posix_spawn_file_actions_adddup2(
       actions, 
       pipes[fd][1], 
-      stdio_count + fd
-    );
+      stdio_count + fd);
     if (err != 0)
       goto error;
   }
@@ -586,8 +585,11 @@ int uv__spawn_resolve_and_spawn(const uv_process_options_t* options,
                                 posix_spawnattr_t* attrs,
                                 posix_spawn_file_actions_t* actions,
                                 pid_t* pid) {
-  const char *p, *z, *path = NULL;
-  size_t l, k;
+  const char *p;
+  const char *z;
+  const char *path = NULL;
+  size_t l;
+  size_t k;
   int err = -1;
 
   /* Short circuit for erroneous case */
@@ -603,7 +605,7 @@ int uv__spawn_resolve_and_spawn(const uv_process_options_t* options,
   /* If options->file contains a slash, posix_spawn/posix_spawnp behave
    * the same, and don't involve PATH resolution at all. Otherwise, if
    * options->file does not include a slash, but no custom environment is 
-   * to be used, the environment used for path  resolution as well for the 
+   * to be used, the environment used for path resolution as well for the 
    * child process is that of the parent process, so posix_spawnp is the
    * way to go. */
   if (strchr(options->file, '/') != NULL || options->env == NULL)
@@ -623,13 +625,12 @@ int uv__spawn_resolve_and_spawn(const uv_process_options_t* options,
 
   k = strnlen(options->file, NAME_MAX+1);
   if (k > NAME_MAX) {
-    errno = ENAMETOOLONG;
-    return -1;
+    return ENAMETOOLONG;
   }
 
   l = strnlen(path, PATH_MAX-1)+1;
 
-  for(p = path;; p = z) {
+  for (p = path;; p = z) {
     /* Compose the new process file from the entry in the PATH
      * environment variable and the actual file name */
     char b[l+k+1];
