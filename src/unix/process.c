@@ -567,18 +567,16 @@ error:
 }
 
 char* uv__spawn_find_path_in_env(char** env) {
-  char** env_iterator = env;
+  char** env_iterator;
 
   /* Look for an environment variable called PATH in the 
    * provided env array, and return its value if found */
-  while (*env_iterator != NULL) {
-    const char* path_name = strstr(*env_iterator, "PATH=");
-    if(path_name != NULL && path_name == *env_iterator) {
+  for (env_iterator = env; *env_iterator != NULL; env_iterator++) {
+    const char path_var[] = "PATH=";
+    if(strncmp(*env_iterator, path_var, sizeof(path_var) - 1) == 0) {
       /* Found "PATH=" at the beginning of the string */
-      return strchr(path_name, '=') + 1;
+      return *env_iterator + sizeof(path_var) - 1;
     }
-
-    ++env_iterator;
   }
 
   return NULL;
