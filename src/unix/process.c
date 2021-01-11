@@ -633,7 +633,7 @@ int uv__spawn_resolve_and_spawn(const uv_process_options_t* options,
   for (p = path;; p = z) {
     /* Compose the new process file from the entry in the PATH
      * environment variable and the actual file name */
-    char b[l+k+1];
+    char b[PATH_MAX + NAME_MAX];
     z = strchr(p, ':');
     if (!z) 
       z = p+strlen(p);
