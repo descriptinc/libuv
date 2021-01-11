@@ -572,7 +572,7 @@ char* uv__spawn_find_path_in_env(char** env) {
    * provided env array, and return its value if found */
   for (env_iterator = env; *env_iterator != NULL; env_iterator++) {
     const char path_var[] = "PATH=";
-    if(strncmp(*env_iterator, path_var, sizeof(path_var) - 1) == 0) {
+    if (strncmp(*env_iterator, path_var, sizeof(path_var) - 1) == 0) {
       /* Found "PATH=" at the beginning of the string */
       return *env_iterator + sizeof(path_var) - 1;
     }
