@@ -38,9 +38,17 @@
 # include <spawn.h>
 # include <paths.h>
 # include <sys/kauth.h>
+# include <sys/types.h>
+# include <sys/sysctl.h>
 # include <dlfcn.h>
 # include <crt_externs.h>
 # define environ (*_NSGetEnviron())
+
+/* macOS 10.14 back does not define this constant */
+# ifndef POSIX_SPAWN_SETSID
+#  define POSIX_SPAWN_SETSID 1024
+# endif
+
 #else
 extern char **environ;
 #endif
@@ -360,8 +368,9 @@ typedef struct uv__posix_spawn_fncs_tag {
 } uv__posix_spawn_fncs_t;
 
 
-static uv_once_t posix_spawn_init_fncs_once = UV_ONCE_INIT;
+static uv_once_t posix_spawn_init_once = UV_ONCE_INIT;
 static uv__posix_spawn_fncs_t posix_spawn_fncs;
+static int posix_spawn_can_use_setsid = 0;
 
 
 void uv__spawn_init_posix_spawn_fncs(void) {
@@ -374,6 +383,46 @@ void uv__spawn_init_posix_spawn_fncs(void) {
     dlsym(RTLD_DEFAULT, "posix_spawnattr_set_groups_np");
   posix_spawn_fncs.file_actions.addchdir_np = 
     dlsym(RTLD_DEFAULT, "posix_spawn_file_actions_addchdir_np");
+}
+
+
+void uv__spawn_init_can_use_setsid(void) {
+  static const int MACOS_CATALINA_VERSION_MAJOR = 19;
+  char version_str[256];
+  char* version_major_str;
+  size_t version_str_size = 256;
+  int r;
+  int version_major;
+
+  /* By default, assume failure */
+  posix_spawn_can_use_setsid = 0;
+
+  /* Get a version string */
+  r = sysctlbyname("kern.osrelease", version_str, &version_str_size, NULL, 0);
+  if (r != 0)
+    return;
+
+  /* Try to get the major version number. If not found
+   * fall back to the fork/exec flow */
+  version_major_str = strtok(version_str, ".");
+  if (version_major_str == NULL)
+    return;
+
+  /* Parse the version major as a number. If it is greater than
+   * the major version for macOS Catalina (aka macOS 10.15), then
+   * the POSIX_SPAWN_SETSID flag is available */
+  version_major = atoi(version_major_str);
+  if (version_major >= MACOS_CATALINA_VERSION_MAJOR)
+    posix_spawn_can_use_setsid = 1;
+}
+
+
+void uv__spawn_init_posix_spawn(void) {
+  /* Init handles to all potentially non-defined functions */
+  uv__spawn_init_posix_spawn_fncs();
+
+  /* Init feature detection for POSIX_SPAWN_SETSID flag */
+  uv__spawn_init_can_use_setsid();
 }
 
 
@@ -448,8 +497,17 @@ int uv__spawn_set_posix_spawn_attrs(posix_spawnattr_t* attrs,
   flags = POSIX_SPAWN_CLOEXEC_DEFAULT |
           POSIX_SPAWN_SETSIGDEF |
           POSIX_SPAWN_SETSIGMASK;
-  if (options->flags & UV_PROCESS_DETACHED) 
+  if (options->flags & UV_PROCESS_DETACHED) {
+    /* If running on a version of macOS where this flag is not supported,
+     * revert back to the fork/exec flow. Otherwise posix_spawn will
+     * silently ignore the flag. */
+    if (!posix_spawn_can_use_setsid) {
+      err = ENOSYS;
+      goto error;
+    }
+
     flags |= POSIX_SPAWN_SETSID;
+  }
   err = posix_spawnattr_setflags(attrs, flags);
   if (err != 0)
     goto error;
@@ -555,7 +613,6 @@ int uv__spawn_set_posix_spawn_file_actions(posix_spawn_file_actions_t* actions,
       if (err != 0)
         goto error;
     }
-    
   }  
 
   return 0;
@@ -580,6 +637,7 @@ char* uv__spawn_find_path_in_env(char** env) {
 
   return NULL;
 }
+
 
 int uv__spawn_resolve_and_spawn(const uv_process_options_t* options, 
                                 posix_spawnattr_t* attrs,
@@ -661,6 +719,7 @@ int uv__spawn_resolve_and_spawn(const uv_process_options_t* options,
   return err;
 }
 
+
 int uv__spawn_and_init_child_posix_spawn(const uv_process_options_t* options,
                                          int stdio_count,
                                          int (*pipes)[2], 
@@ -730,7 +789,7 @@ int uv__spawn_and_init_child(const uv_process_options_t* options,
   int err = 0;
 
 #if defined(__APPLE__) 
-  uv_once(&posix_spawn_init_fncs_once, uv__spawn_init_posix_spawn_fncs);
+  uv_once(&posix_spawn_init_once, uv__spawn_init_posix_spawn);
 
   /* Special child process spawn case for macOS Big Sur (11.0) onwards 
    *
